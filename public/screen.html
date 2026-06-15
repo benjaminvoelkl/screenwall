@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <title>Screenwall – Anzeige</title>
+  <link rel="stylesheet" href="/css/screen.css" />
+</head>
+<body>
+  <!-- Verbindungs-Overlay (wird bei WS-Abbruch eingeblendet) -->
+  <div id="offline" class="offline hidden">Verbindung verloren – verbinde neu…</div>
+
+  <!-- Modus 3: Willkommen -->
+  <section id="welcome" class="layer welcome hidden">
+    <div class="welcome-text" id="welcome-text"></div>
+  </section>
+
+  <!-- Modus 1: Diashow (eigene Crossfade-Lösung, keine externe Lib nötig) -->
+  <section id="slideshow" class="layer slideshow hidden"></section>
+
+  <!-- Modus 2: YouTube -->
+  <section id="youtube" class="layer youtube hidden">
+    <div id="yt-player"></div>
+  </section>
+
+  <script src="/js/screen.js"></script>
+</body>
+</html>

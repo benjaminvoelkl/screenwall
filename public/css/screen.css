@@ -1,0 +1,116 @@
+/* Vollbild-Anzeige: kein Scrollbalken, schwarzer Hintergrund. */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+  color: #fff;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+/* Mauszeiger nach Inaktivität ausblenden. */
+body.idle { cursor: none; }
+
+.layer {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.hidden { display: none !important; }
+
+/* --- Verbindungs-Overlay --- */
+.offline {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  background: rgba(180, 30, 30, 0.92);
+  color: #fff;
+  padding: 8px 18px;
+  border-radius: 999px;
+  font-size: 15px;
+  letter-spacing: 0.02em;
+}
+
+/* --- Modus 1: Diashow --- */
+.slideshow { background: #000; }
+.slide {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+  opacity: 0;
+  transition: opacity 0.8s ease;
+}
+.slide.active { opacity: 1; }
+/* contain + schwarzer Hintergrund: zugeschnittene und nicht zugeschnittene
+   Bilder sehen sauber aus, ohne Beschnitt/Verzerrung. */
+.slide img, .slide video {
+  max-width: 100%;
+  max-height: 100%;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* --- Modus 2: YouTube --- */
+.youtube { background: #000; }
+#yt-player, #yt-player iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+/* --- Modus 3: Willkommen --- */
+.welcome {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  transition: opacity 0.6s ease;
+}
+.welcome.fade-out { opacity: 0; }
+.welcome-text {
+  padding: 0 6vw;
+  line-height: 1.15;
+  max-width: 100%;
+  word-break: break-word;
+}
+
+/* Vorlage: Elegant – dunkel, Serifenschrift, goldener Akzent. */
+.welcome.tpl-elegant {
+  background: radial-gradient(circle at 50% 40%, #1c1c24 0%, #0a0a0d 75%);
+}
+.welcome.tpl-elegant .welcome-text {
+  font-family: "Georgia", "Times New Roman", serif;
+  color: #f3e6c4;
+  text-shadow: 0 2px 30px rgba(212, 175, 55, 0.25);
+}
+
+/* Vorlage: Modern – hell, minimal, serifenlos. */
+.welcome.tpl-modern {
+  background: #f6f7f9;
+}
+.welcome.tpl-modern .welcome-text {
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-weight: 300;
+  letter-spacing: 0.01em;
+  color: #14161a;
+}
+
+/* Vorlage: Festlich – kräftige Akzentfarbe, fett. */
+.welcome.tpl-festive {
+  background: linear-gradient(135deg, #6a1b9a 0%, #d81b60 55%, #f4511e 100%);
+}
+.welcome.tpl-festive .welcome-text {
+  font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+  font-weight: 800;
+  color: #fff;
+  text-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+}

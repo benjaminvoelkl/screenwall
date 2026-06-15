@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Screenwall – Steuerung</title>
+  <!-- Cropper.js für optionalen 18:16-Zuschnitt (CDN). -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.css" />
+  <link rel="stylesheet" href="/css/control.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1>Screenwall</h1>
+    <div class="status">
+      <span id="conn-dot" class="dot"></span>
+      <span id="conn-text">verbinde…</span>
+      <a class="screen-link" href="/screen" target="_blank">/screen öffnen ↗</a>
+    </div>
+  </header>
+
+  <nav class="modes">
+    <button class="mode-btn" data-mode="slideshow">Diashow</button>
+    <button class="mode-btn" data-mode="youtube">YouTube-Playlist</button>
+    <button class="mode-btn" data-mode="welcome">Willkommen</button>
+  </nav>
+
+  <main>
+    <!-- ===== Modus 1: Diashow ===== -->
+    <section class="panel" id="panel-slideshow">
+      <h2>Diashow</h2>
+
+      <div class="seq-bar">
+        <label>Sequenz
+          <select id="ss-seq-select"></select>
+        </label>
+        <button id="ss-seq-new" class="btn">+ Neue Sequenz</button>
+        <button id="ss-seq-rename" class="btn ghost">Umbenennen</button>
+        <button id="ss-seq-delete" class="btn ghost">Löschen</button>
+      </div>
+      <p class="hint">Die gewählte Sequenz wird auf <code>/screen</code> angezeigt und hier bearbeitet.</p>
+
+      <div class="row">
+        <label>Anzeigedauer pro Bild (Sekunden)
+          <input type="number" id="ss-duration" min="1" max="120" step="1" />
+        </label>
+        <label>Video-Weiterschaltung
+          <select id="ss-videomode">
+            <option value="end">nach Videoende</option>
+            <option value="duration">nach Anzeigedauer</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="upload-area">
+        <label class="file-btn">
+          + Medien hochladen (Bilder &amp; Videos)
+          <input type="file" id="ss-file" accept="image/*,video/*" multiple hidden />
+        </label>
+        <label class="checkbox">
+          <input type="checkbox" id="ss-crop-toggle" />
+          Bilder vor Upload auf 18:16 zuschneiden
+        </label>
+      </div>
+
+      <ul id="ss-list" class="media-list"></ul>
+      <p class="hint">Reihenfolge per Drag &amp; Drop ändern. Klick auf 🗑 löscht ein Medium.</p>
+    </section>
+
+    <!-- ===== Modus 2: YouTube ===== -->
+    <section class="panel" id="panel-youtube">
+      <h2>YouTube-Playlist</h2>
+      <div class="row">
+        <label class="grow">YouTube-Link oder Video-ID hinzufügen
+          <input type="text" id="yt-input" placeholder="https://youtu.be/… oder Video-ID" />
+        </label>
+        <button id="yt-add" class="btn">Hinzufügen</button>
+      </div>
+      <label class="checkbox">
+        <input type="checkbox" id="yt-muted" />
+        Stumm abspielen (für zuverlässigen Autoplay empfohlen)
+      </label>
+      <ul id="yt-list" class="media-list"></ul>
+      <p class="hint">Reihenfolge per Drag &amp; Drop ändern.</p>
+    </section>
+
+    <!-- ===== Modus 3: Willkommen ===== -->
+    <section class="panel" id="panel-welcome">
+      <h2>Willkommen</h2>
+      <label class="grow">Botschaft
+        <textarea id="wc-text" rows="2"></textarea>
+      </label>
+      <div class="row">
+        <label>Vorlage
+          <select id="wc-template">
+            <option value="elegant">Elegant (dunkel, Serifenschrift)</option>
+            <option value="modern">Modern (hell, minimal)</option>
+            <option value="festive">Festlich (Akzentfarbe)</option>
+          </select>
+        </label>
+        <label>Schriftgröße
+          <input type="range" id="wc-fontsize" min="3" max="16" step="0.5" />
+          <span id="wc-fontsize-val"></span>
+        </label>
+        <label class="checkbox">
+          <input type="checkbox" id="wc-visible" />
+          Sichtbar (eingeblendet)
+        </label>
+      </div>
+    </section>
+  </main>
+
+  <!-- Crop-Dialog -->
+  <div id="crop-modal" class="modal hidden">
+    <div class="modal-box">
+      <h3>Auf 18:16 zuschneiden</h3>
+      <div class="crop-stage"><img id="crop-img" alt="" /></div>
+      <div class="modal-actions">
+        <button id="crop-cancel" class="btn ghost">Original verwenden</button>
+        <button id="crop-confirm" class="btn">Zuschneiden &amp; hochladen</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.js"></script>
+  <script src="/js/control.js"></script>
+</body>
+</html>
