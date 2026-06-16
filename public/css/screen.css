@@ -61,22 +61,24 @@ body.idle { cursor: none; }
 
 /* --- Modus 2: YouTube --- */
 .youtube { background: #000; }
-#yt-player, #yt-player iframe {
+#yt-player {
   width: 100%;
   height: 100%;
   border: 0;
 }
 /* Zuschnitt: 16:9-Video formatfüllend (Cover); der Überstand wird durch
-   overflow:hidden am Layer beschnitten. */
+   overflow:hidden am Layer beschnitten. Die YouTube-API ersetzt den
+   #yt-player-Div durch ein <iframe id="yt-player">, daher zielen wir direkt
+   auf #yt-player (nicht auf ein verschachteltes iframe). */
 .youtube.crop { overflow: hidden; }
-.youtube.crop #yt-player iframe {
+.youtube.crop #yt-player {
   position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: max(100vw, calc(100vh * 16 / 9));
-  height: max(100vh, calc(100vw * 9 / 16));
-  max-width: none;
+  top: 50% !important;
+  left: 50% !important;
+  transform: translate(-50%, -50%) !important;
+  width: max(100vw, calc(100vh * 16 / 9)) !important;
+  height: max(100vh, calc(100vw * 9 / 16)) !important;
+  max-width: none !important;
 }
 
 /* --- Modus 3: Link (Vollbild-iframe) --- */
