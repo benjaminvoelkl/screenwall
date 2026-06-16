@@ -53,6 +53,7 @@ const DEFAULT_STATE = {
   },
   youtube: {
     muted: true, // Browser erlauben Autoplay meist nur stummgeschaltet.
+    crop: false, // true = Video formatfüllend zuschneiden (Cover) statt Balken.
     videos: [] // [{ id, videoId, title }]
   },
   // Modus „Link": Webseiten werden nacheinander im Vollbild (iframe) gezeigt.

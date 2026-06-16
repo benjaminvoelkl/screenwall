@@ -193,6 +193,8 @@
   // ===== Modus 2: YouTube =================================================
   $('yt-muted').addEventListener('change', (e) =>
     postState({ youtube: { muted: e.target.checked } }));
+  $('yt-crop').addEventListener('change', (e) =>
+    postState({ youtube: { crop: e.target.checked } }));
 
   $('yt-add').addEventListener('click', addYoutube);
   $('yt-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') addYoutube(); });
@@ -445,6 +447,7 @@
 
     // YouTube
     setIfNotFocused($('yt-muted'), state.youtube.muted);
+    setIfNotFocused($('yt-crop'), state.youtube.crop);
     renderYoutubeList();
 
     // Link

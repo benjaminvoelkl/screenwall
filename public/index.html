@@ -82,7 +82,7 @@
             </select>
           </label>
           <label>Überschrift-Größe
-            <input type="range" id="wc-fontsize" min="3" max="16" step="0.5" />
+            <input type="range" id="wc-fontsize" min="3" max="28" step="0.5" />
             <span id="wc-fontsize-val"></span>
           </label>
           <label>Blur (Hintergrund)
@@ -101,11 +101,11 @@
             </label>
             <div class="row">
               <label>Textgröße
-                <input type="range" id="wc-left-textsize" min="2" max="12" step="0.2" />
+                <input type="range" id="wc-left-textsize" min="2" max="24" step="0.2" />
                 <span id="wc-left-textsize-val"></span>
               </label>
               <label>Logogröße
-                <input type="range" id="wc-left-logosize" min="5" max="45" step="1" />
+                <input type="range" id="wc-left-logosize" min="5" max="80" step="1" />
                 <span id="wc-left-logosize-val"></span>
               </label>
             </div>
@@ -132,11 +132,11 @@
             </label>
             <div class="row">
               <label>Textgröße
-                <input type="range" id="wc-right-textsize" min="2" max="12" step="0.2" />
+                <input type="range" id="wc-right-textsize" min="2" max="24" step="0.2" />
                 <span id="wc-right-textsize-val"></span>
               </label>
               <label>Logogröße
-                <input type="range" id="wc-right-logosize" min="5" max="45" step="1" />
+                <input type="range" id="wc-right-logosize" min="5" max="80" step="1" />
                 <span id="wc-right-logosize-val"></span>
               </label>
             </div>
@@ -172,6 +172,10 @@
       <label class="checkbox">
         <input type="checkbox" id="yt-muted" />
         Stumm abspielen (für zuverlässigen Autoplay empfohlen)
+      </label>
+      <label class="checkbox">
+        <input type="checkbox" id="yt-crop" />
+        Video formatfüllend zuschneiden (Bildschirm füllen statt schwarzer Balken)
       </label>
       <ul id="yt-list" class="media-list"></ul>
       <p class="hint">Reihenfolge per Drag &amp; Drop ändern.</p>

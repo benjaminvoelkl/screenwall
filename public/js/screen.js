@@ -76,6 +76,7 @@
     if (mode === 'slideshow') Slideshow.update(state.slideshow, prev?.slideshow, prev?.mode !== 'slideshow');
     else Slideshow.stop();
 
+    els.youtube.classList.toggle('crop', !!state.youtube.crop);
     if (mode === 'youtube') YT.update(state.youtube, prev?.youtube, prev?.mode !== 'youtube');
     else YT.stop();
 

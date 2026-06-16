@@ -66,6 +66,18 @@ body.idle { cursor: none; }
   height: 100%;
   border: 0;
 }
+/* Zuschnitt: 16:9-Video formatfüllend (Cover); der Überstand wird durch
+   overflow:hidden am Layer beschnitten. */
+.youtube.crop { overflow: hidden; }
+.youtube.crop #yt-player iframe {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: max(100vw, calc(100vh * 16 / 9));
+  height: max(100vh, calc(100vw * 9 / 16));
+  max-width: none;
+}
 
 /* --- Modus 3: Link (Vollbild-iframe) --- */
 .link { background: #000; }
@@ -114,9 +126,10 @@ body.idle { cursor: none; }
    gedämpft durch, der Text bleibt gut lesbar. */
 .wc-card {
   --wc-blur: 18px;
-  width: min(86vw, 1600px);
-  max-height: 86vh;
-  padding: 4vh 4vw;
+  width: 94vw; /* fast bildschirmfüllend – wichtig für große 4K-Wände */
+  max-width: none;
+  max-height: 92vh;
+  padding: 5vh 3vw;
   border-radius: 24px;
   backdrop-filter: blur(var(--wc-blur));
   -webkit-backdrop-filter: blur(var(--wc-blur));
@@ -143,9 +156,9 @@ body.idle { cursor: none; }
   gap: 2.5vh;
   min-width: 0;
 }
-/* Feste Bezel-Schutzzone in der Mitte (Spalt zwischen den zwei TVs). */
+/* Bezel-Schutzzone in der Mitte – vorerst deaktiviert (eine logische Fläche). */
 .wc-gap {
-  flex: 0 0 8vw;
+  flex: 0 0 0;
 }
 .wc-logo {
   max-width: 80%;
