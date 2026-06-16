@@ -74,31 +74,27 @@
           Overlay über der Diashow einblenden
         </label>
 
-        <div class="wc-presets">
-          <h4>Presets</h4>
-          <div class="row">
-            <label class="grow">Gespeichertes Preset
-              <select id="wc-preset-select"></select>
-            </label>
-            <button id="wc-preset-overwrite" class="btn ghost">💾 Überschreiben</button>
-            <button id="wc-preset-delete" class="btn ghost">🗑 Löschen</button>
-          </div>
-          <button id="wc-preset-save" class="btn">Als neues Preset speichern</button>
-          <p class="hint">Auswahl im Dropdown wendet das Preset sofort an (ohne das Overlay ein-/auszuschalten).
-            💾 überschreibt das gewählte Preset mit der aktuellen Gestaltung.</p>
-        </div>
         <div class="row">
-          <label>Vorlage
+          <label class="grow">Vorlage
             <select id="wc-template">
-              <option value="elegant">Elegant (dunkel, Serifenschrift)</option>
-              <option value="modern">Modern (hell, minimal)</option>
-              <option value="festive">Festlich (Akzentfarbe)</option>
-              <option value="dark">Dunkel (schwarz, weißer Text)</option>
-              <option value="corporate">Corporate (hell, blau, sachlich)</option>
-              <option value="contrast">Kontrast (weiß auf schwarz, fett)</option>
-              <option value="christmas">Weihnachten (rot/grün, gold)</option>
+              <optgroup label="Stile">
+                <option value="style:elegant">Elegant (dunkel, Serifenschrift)</option>
+                <option value="style:modern">Modern (hell, minimal)</option>
+                <option value="style:festive">Festlich (Akzentfarbe)</option>
+                <option value="style:dark">Dunkel (schwarz, weißer Text)</option>
+                <option value="style:corporate">Corporate (hell, blau, sachlich)</option>
+                <option value="style:contrast">Kontrast (weiß auf schwarz, fett)</option>
+                <option value="style:christmas">Weihnachten (rot/grün, gold)</option>
+              </optgroup>
+              <optgroup label="Eigene Vorlagen" id="wc-template-presets" hidden></optgroup>
             </select>
           </label>
+          <button id="wc-preset-save" class="btn">Speichern</button>
+          <button id="wc-preset-delete" class="btn ghost">Löschen</button>
+        </div>
+        <p class="hint">Auswahl wendet sofort an. „Speichern" legt die aktuelle Gestaltung als
+          eigene Vorlage an (erscheint hier im Dropdown). „Löschen" entfernt die gewählte eigene Vorlage.</p>
+        <div class="row">
           <label>Überschrift-Größe
             <input type="range" id="wc-fontsize" min="3" max="28" step="0.5" />
             <span id="wc-fontsize-val"></span>

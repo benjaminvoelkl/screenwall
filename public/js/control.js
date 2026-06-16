@@ -314,8 +314,17 @@
   // ===== Willkommens-Overlay (Teil der Diashow) ==========================
   $('wc-visible').addEventListener('change', (e) =>
     postState({ welcome: { visible: e.target.checked } }));
-  $('wc-template').addEventListener('change', (e) =>
-    postState({ welcome: { template: e.target.value } }));
+  // Vorlage-Dropdown enthält Stile (style:…) und eigene Vorlagen (preset:…).
+  let curTplSel = null;
+  $('wc-template').addEventListener('change', (e) => {
+    const v = e.target.value;
+    curTplSel = v;
+    if (v.startsWith('preset:')) {
+      fetch(`/api/welcome/preset/${v.slice(7)}/apply`, { method: 'POST' });
+    } else if (v.startsWith('style:')) {
+      postState({ welcome: { template: v.slice(6) } });
+    }
+  });
   $('wc-fontsize').addEventListener('input', (e) => {
     $('wc-fontsize-val').textContent = `${e.target.value} vw`;
     postState({ welcome: { fontSize: Number(e.target.value) } });
@@ -366,18 +375,10 @@
   bindLogo('left');
   bindLogo('right');
 
-  // Presets als Dropdown: Auswahl wendet sofort an; Buttons für speichern/
-  // überschreiben/löschen. Die Auswahl wird clientseitig gemerkt.
-  let selectedPresetId = null;
-
-  $('wc-preset-select').addEventListener('change', (e) => {
-    selectedPresetId = e.target.value || null;
-    if (selectedPresetId) fetch(`/api/welcome/preset/${selectedPresetId}/apply`, { method: 'POST' });
-  });
-
+  // Speichern: aktuelle Gestaltung als eigene Vorlage (Preset) anlegen.
   $('wc-preset-save').addEventListener('click', async () => {
     const n = (state.welcome.presets || []).length + 1;
-    const name = prompt('Name des Presets:', `Preset ${n}`);
+    const name = prompt('Name der Vorlage:', `Vorlage ${n}`);
     if (name === null) return;
     const r = await fetch('/api/welcome/preset', {
       method: 'POST',
@@ -385,49 +386,43 @@
       body: JSON.stringify({ name })
     });
     const created = await r.json();
-    if (created && created.id) selectedPresetId = created.id; // neues gleich auswählen
+    if (created && created.id) curTplSel = `preset:${created.id}`; // gleich auswählen
   });
 
-  $('wc-preset-overwrite').addEventListener('click', () => {
-    const p = (state.welcome.presets || []).find((x) => x.id === selectedPresetId);
-    if (!p) return;
-    if (confirm(`Preset „${p.name}" mit der aktuellen Gestaltung überschreiben?`))
-      fetch(`/api/welcome/preset/${p.id}/save`, { method: 'POST' });
-  });
-
+  // Löschen: die aktuell gewählte eigene Vorlage entfernen.
   $('wc-preset-delete').addEventListener('click', () => {
-    const p = (state.welcome.presets || []).find((x) => x.id === selectedPresetId);
-    if (!p) return;
-    if (confirm(`Preset „${p.name}" löschen?`)) {
-      fetch(`/api/welcome/preset/${p.id}`, { method: 'DELETE' });
-      selectedPresetId = null;
+    const v = $('wc-template').value;
+    if (!v.startsWith('preset:')) return;
+    const id = v.slice(7);
+    const p = (state.welcome.presets || []).find((x) => x.id === id);
+    if (p && confirm(`Eigene Vorlage „${p.name}" löschen?`)) {
+      fetch(`/api/welcome/preset/${id}`, { method: 'DELETE' });
+      curTplSel = null;
     }
   });
 
-  function renderPresets() {
-    const sel = $('wc-preset-select');
+  // Vorlage-Dropdown füllen (Stile + eigene Vorlagen) und Auswahl/Buttons setzen.
+  function renderTemplateSelect() {
+    const sel = $('wc-template');
+    if (document.activeElement === sel) return; // nicht stören, während offen
+    const grp = $('wc-template-presets');
+    grp.innerHTML = '';
     const presets = state.welcome.presets || [];
-    if (document.activeElement !== sel) {
-      sel.innerHTML = '';
-      if (!presets.length) {
-        const o = document.createElement('option');
-        o.value = '';
-        o.textContent = '(keine Presets gespeichert)';
-        sel.appendChild(o);
-      } else {
-        for (const p of presets) {
-          const o = document.createElement('option');
-          o.value = p.id;
-          o.textContent = p.name;
-          sel.appendChild(o);
-        }
-      }
-      if (selectedPresetId && presets.some((p) => p.id === selectedPresetId)) sel.value = selectedPresetId;
-      else selectedPresetId = sel.value || null;
+    for (const p of presets) {
+      const o = document.createElement('option');
+      o.value = `preset:${p.id}`;
+      o.textContent = p.name;
+      grp.appendChild(o);
     }
-    const canEdit = !!selectedPresetId;
-    $('wc-preset-overwrite').disabled = !canEdit;
-    $('wc-preset-delete').disabled = !canEdit;
+    grp.hidden = presets.length === 0;
+    // Gewünschte Auswahl: gemerkte Auswahl, sonst der aktive Stil.
+    let want = curTplSel;
+    if (!want || ![...sel.options].some((o) => o.value === want)) {
+      want = `style:${state.welcome.template || 'elegant'}`;
+    }
+    sel.value = want;
+    curTplSel = sel.value;
+    $('wc-preset-delete').disabled = !sel.value.startsWith('preset:');
   }
 
   // ===== Drag & Drop Reorder (gemeinsam) =================================
@@ -521,7 +516,7 @@
     // Willkommens-Overlay
     const w = state.welcome;
     setIfNotFocused($('wc-visible'), w.visible);
-    setIfNotFocused($('wc-template'), w.template);
+    renderTemplateSelect();
     setIfNotFocused($('wc-fontsize'), w.fontSize);
     $('wc-fontsize-val').textContent = `${w.fontSize} vw`;
     setIfNotFocused($('wc-blur'), w.blur);
@@ -537,7 +532,6 @@
       renderLogoPreview(side, s.logo);
       renderWcOrder(side, s.logoPos);
     }
-    renderPresets();
   }
 
   function renderLogoPreview(side, logo) {

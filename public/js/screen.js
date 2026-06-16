@@ -265,6 +265,9 @@
         events: {
           onReady: () => {
             ready = true;
+            // Autoplay-Policy moderner Browser: das iframe braucht ein
+            // allow="autoplay" und das Abspielen muss explizit (stumm) erfolgen.
+            try { player.getIframe().setAttribute('allow', 'autoplay; encrypted-media; fullscreen; playsinline'); } catch (_) {}
             if (pendingApply) { const p = pendingApply; pendingApply = null; apply(...p); }
           },
           onStateChange: (e) => {
@@ -303,7 +306,12 @@
     function load() {
       const v = videos[idx];
       if (!v) return;
-      try { player.loadVideoById(v.videoId); } catch (_) {}
+      try {
+        player.loadVideoById(v.videoId);
+        // Stummgeschaltetes Abspielen ist von der Autoplay-Policy erlaubt und
+        // wird hier explizit angestoßen, falls autoplay ignoriert wird.
+        if (muted) { player.mute(); player.playVideo(); }
+      } catch (_) {}
     }
 
     function playNext() {
