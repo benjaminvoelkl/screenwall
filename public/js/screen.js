@@ -114,7 +114,9 @@
       logoEl.removeAttribute('src');
       logoEl.classList.add('hidden');
     }
-    logoEl.style.maxHeight = `${side.logoSize || 22}vh`;
+    // Breite steuert die Größe (wirkt bei jedem Seitenverhältnis), Höhe folgt.
+    logoEl.style.width = `${side.logoSize || 22}vw`;
+    logoEl.style.height = 'auto';
     textEl.textContent = side.text || '';
     textEl.style.fontSize = `${side.textSize || 4.8}vw`;
     // Logo über oder unter dem Text (per Flex-order).

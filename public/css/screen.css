@@ -161,8 +161,11 @@ body.idle { cursor: none; }
   flex: 0 0 0;
 }
 .wc-logo {
-  max-width: 80%;
-  max-height: 22vh; /* per Inline-Style aus dem State überschrieben */
+  /* Größe wird per Inline-Style (Breite in vw) aus dem State gesetzt; die
+     Breite wirkt bei jedem Seitenverhältnis. max-height verhindert nur, dass
+     sehr hohe Logos die Karte sprengen. */
+  max-width: 100%;
+  max-height: 90vh;
   object-fit: contain;
 }
 .wc-text {
@@ -206,4 +209,59 @@ body.idle { cursor: none; }
   font-weight: 800;
   color: #fff;
   text-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+}
+
+/* Vorlage: Dunkel – fast schwarze Karte, klarer weißer Text. */
+.welcome-overlay.tpl-dark .wc-card {
+  background: rgba(0, 0, 0, 0.62);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+.welcome-overlay.tpl-dark .wc-headline,
+.welcome-overlay.tpl-dark .wc-text {
+  font-family: "Segoe UI", system-ui, sans-serif;
+  font-weight: 600;
+  color: #ffffff;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.6);
+}
+
+/* Vorlage: Corporate – helle Karte, sachlich, blauer Akzent. */
+.welcome-overlay.tpl-corporate .wc-card {
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(11, 42, 74, 0.15);
+}
+.welcome-overlay.tpl-corporate .wc-headline {
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-weight: 700;
+  color: #0b2a4a;
+}
+.welcome-overlay.tpl-corporate .wc-text {
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-weight: 400;
+  color: #1f4e79;
+}
+
+/* Vorlage: Kontrast – maximale Lesbarkeit, weiß auf tiefschwarz, fett. */
+.welcome-overlay.tpl-contrast .wc-card {
+  background: rgba(0, 0, 0, 0.82);
+  border: 2px solid #ffffff;
+}
+.welcome-overlay.tpl-contrast .wc-headline,
+.welcome-overlay.tpl-contrast .wc-text {
+  font-family: "Arial Black", "Segoe UI", sans-serif;
+  font-weight: 900;
+  letter-spacing: 0.01em;
+  color: #ffffff;
+}
+
+/* Vorlage: Weihnachten – tiefrot/grün, goldener Text. */
+.welcome-overlay.tpl-christmas .wc-card {
+  background: linear-gradient(135deg, rgba(122, 16, 16, 0.7) 0%, rgba(15, 61, 30, 0.7) 100%);
+  border: 1px solid rgba(212, 175, 55, 0.4);
+}
+.welcome-overlay.tpl-christmas .wc-headline,
+.welcome-overlay.tpl-christmas .wc-text {
+  font-family: "Georgia", "Times New Roman", serif;
+  font-weight: 700;
+  color: #f6e3a1;
+  text-shadow: 0 2px 20px rgba(0, 0, 0, 0.45);
 }

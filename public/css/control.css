@@ -181,6 +181,12 @@ textarea { resize: vertical; }
 .wc-order-item.dragging { opacity: 0.5; }
 .wc-order-item .drag { color: var(--muted); }
 
+.wc-presets { margin: 14px 0 4px; }
+.wc-presets h4 { margin: 0 0 10px; font-size: 14px; color: var(--muted); }
+.wc-presets .media-item { cursor: default; }
+.wc-presets .btn.apply { padding: 7px 12px; }
+.wc-presets .btn.overwrite { padding: 7px 10px; }
+
 /* Crop-Modal */
 .modal {
   position: fixed; inset: 0; background: rgba(0,0,0,0.7);

@@ -72,7 +72,9 @@ const DEFAULT_STATE = {
     // Pro Seite: logo (Dateiname), text, Textgröße (vw), Logogröße (vh),
     // logoPos = 'top' | 'bottom' (Logo über oder unter dem Text, per Drag&Drop).
     left: { logo: null, text: '', textSize: 4.8, logoSize: 22, logoPos: 'top' },
-    right: { logo: null, text: '', textSize: 4.8, logoSize: 22, logoPos: 'top' }
+    right: { logo: null, text: '', textSize: 4.8, logoSize: 22, logoPos: 'top' },
+    // Gespeicherte Presets: [{ id, name, config: {template,fontSize,blur,headline,left,right} }]
+    presets: []
   }
 };
 
@@ -141,8 +143,33 @@ function normalizeWelcome(w) {
       logoPos: s.logoPos === 'bottom' ? 'bottom' : 'top'
     };
   }
+  if (!Array.isArray(w.presets)) w.presets = [];
   delete w.text; // altes Single-Text-Feld entfernen
   return w;
+}
+
+// Momentaufnahme der Overlay-Gestaltung (ohne visible/presets) für ein Preset.
+function welcomeConfigSnapshot(w) {
+  return {
+    template: w.template,
+    fontSize: w.fontSize,
+    blur: w.blur,
+    headline: w.headline,
+    left: { ...w.left },
+    right: { ...w.right }
+  };
+}
+
+// Prüft, ob eine Logo-Datei noch irgendwo referenziert wird (aktuell oder in
+// einem Preset). Verhindert, dass ein noch genutztes Logo gelöscht wird.
+function logoInUse(filename) {
+  if (!filename) return false;
+  const w = state.welcome;
+  if (w.left.logo === filename || w.right.logo === filename) return true;
+  for (const p of w.presets || []) {
+    if (p.config?.left?.logo === filename || p.config?.right?.logo === filename) return true;
+  }
+  return false;
 }
 
 let state = loadState();
@@ -393,10 +420,11 @@ app.post('/api/welcome/logo', upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Keine Datei empfangen' });
   const side = req.body.side === 'right' ? 'right' : 'left';
   const old = state.welcome[side].logo;
-  if (old) {
+  state.welcome[side].logo = req.file.filename;
+  // Altes Logo nur löschen, wenn es nicht noch von einem Preset genutzt wird.
+  if (old && old !== req.file.filename && !logoInUse(old)) {
     try { unlinkSync(join(UPLOAD_DIR, old)); } catch (_) { /* egal */ }
   }
-  state.welcome[side].logo = req.file.filename;
   saveState();
   broadcast();
   res.json({ side, logo: req.file.filename });
@@ -406,10 +434,70 @@ app.post('/api/welcome/logo', upload.single('file'), (req, res) => {
 app.delete('/api/welcome/logo', (req, res) => {
   const side = req.body?.side === 'right' ? 'right' : 'left';
   const old = state.welcome[side].logo;
-  if (old) {
+  state.welcome[side].logo = null;
+  if (old && !logoInUse(old)) {
     try { unlinkSync(join(UPLOAD_DIR, old)); } catch (_) { /* egal */ }
   }
-  state.welcome[side].logo = null;
+  saveState();
+  broadcast();
+  res.json({ ok: true });
+});
+
+// --- Willkommens-Overlay: Presets ------------------------------------------
+// Aktuelle Gestaltung als benanntes Preset speichern.
+app.post('/api/welcome/preset', (req, res) => {
+  const name = (req.body?.name || '').trim() || `Preset ${state.welcome.presets.length + 1}`;
+  const preset = { id: randomUUID(), name, config: welcomeConfigSnapshot(state.welcome) };
+  state.welcome.presets.push(preset);
+  saveState();
+  broadcast();
+  res.json(preset);
+});
+
+// Preset auf das Overlay anwenden (visible bleibt unverändert).
+app.post('/api/welcome/preset/:id/apply', (req, res) => {
+  const preset = state.welcome.presets.find((p) => p.id === req.params.id);
+  if (!preset) return res.status(404).json({ error: 'Preset nicht gefunden' });
+  const c = preset.config || {};
+  const w = state.welcome;
+  if (typeof c.template === 'string') w.template = c.template;
+  if (typeof c.fontSize === 'number') w.fontSize = c.fontSize;
+  if (typeof c.blur === 'number') w.blur = c.blur;
+  if (typeof c.headline === 'string') w.headline = c.headline;
+  if (c.left) w.left = { ...c.left };
+  if (c.right) w.right = { ...c.right };
+  saveState();
+  broadcast();
+  res.json(w);
+});
+
+// Preset überschreiben (mit der aktuellen Gestaltung).
+app.post('/api/welcome/preset/:id/save', (req, res) => {
+  const preset = state.welcome.presets.find((p) => p.id === req.params.id);
+  if (!preset) return res.status(404).json({ error: 'Preset nicht gefunden' });
+  const oldLogos = [preset.config?.left?.logo, preset.config?.right?.logo];
+  preset.config = welcomeConfigSnapshot(state.welcome);
+  // Nicht mehr referenzierte Logos der alten Preset-Version aufräumen.
+  for (const fn of oldLogos) {
+    if (fn && !logoInUse(fn)) {
+      try { unlinkSync(join(UPLOAD_DIR, fn)); } catch (_) { /* egal */ }
+    }
+  }
+  saveState();
+  broadcast();
+  res.json(preset);
+});
+
+// Preset löschen (und dessen Logos, falls nirgends sonst genutzt).
+app.delete('/api/welcome/preset/:id', (req, res) => {
+  const idx = state.welcome.presets.findIndex((p) => p.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: 'Preset nicht gefunden' });
+  const [removed] = state.welcome.presets.splice(idx, 1);
+  for (const fn of [removed.config?.left?.logo, removed.config?.right?.logo]) {
+    if (fn && !logoInUse(fn)) {
+      try { unlinkSync(join(UPLOAD_DIR, fn)); } catch (_) { /* egal */ }
+    }
+  }
   saveState();
   broadcast();
   res.json({ ok: true });

@@ -336,7 +336,7 @@
       postState({ welcome: { [side]: { textSize: Number(e.target.value) } } });
     });
     $(`wc-${side}-logosize`).addEventListener('input', (e) => {
-      $(`wc-${side}-logosize-val`).textContent = `${e.target.value} vh`;
+      $(`wc-${side}-logosize-val`).textContent = `${e.target.value} vw`;
       postState({ welcome: { [side]: { logoSize: Number(e.target.value) } } });
     });
     // Logo-Position (oben/unten) per Drag & Drop der zwei Einträge.
@@ -365,6 +365,46 @@
   }
   bindLogo('left');
   bindLogo('right');
+
+  // Presets: aktuelle Gestaltung speichern.
+  $('wc-preset-save').addEventListener('click', async () => {
+    const n = (state.welcome.presets || []).length + 1;
+    const name = prompt('Name des Presets:', `Preset ${n}`);
+    if (name === null) return;
+    await fetch('/api/welcome/preset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name })
+    });
+  });
+
+  function renderPresets() {
+    const ul = $('wc-preset-list');
+    ul.innerHTML = '';
+    for (const p of state.welcome.presets || []) {
+      const li = document.createElement('li');
+      li.className = 'media-item';
+      li.innerHTML = `
+        <span class="meta">
+          <div class="name">${escapeHtml(p.name)}</div>
+          <div class="type">Stil: ${escapeHtml(p.config?.template || '–')}</div>
+        </span>
+        <button class="btn apply">Anwenden</button>
+        <button class="btn ghost overwrite" title="Mit aktueller Einstellung überschreiben">💾</button>
+        <button class="del" title="Löschen">🗑</button>`;
+      li.querySelector('.apply').addEventListener('click', () =>
+        fetch(`/api/welcome/preset/${p.id}/apply`, { method: 'POST' }));
+      li.querySelector('.overwrite').addEventListener('click', () => {
+        if (confirm(`Preset „${p.name}" mit der aktuellen Einstellung überschreiben?`))
+          fetch(`/api/welcome/preset/${p.id}/save`, { method: 'POST' });
+      });
+      li.querySelector('.del').addEventListener('click', () => {
+        if (confirm(`Preset „${p.name}" löschen?`))
+          fetch(`/api/welcome/preset/${p.id}`, { method: 'DELETE' });
+      });
+      ul.appendChild(li);
+    }
+  }
 
   // ===== Drag & Drop Reorder (gemeinsam) =================================
   function enableDragReorder(container, onDrop) {
@@ -469,10 +509,11 @@
       setIfNotFocused($(`wc-${side}-textsize`), s.textSize);
       $(`wc-${side}-textsize-val`).textContent = `${s.textSize} vw`;
       setIfNotFocused($(`wc-${side}-logosize`), s.logoSize);
-      $(`wc-${side}-logosize-val`).textContent = `${s.logoSize} vh`;
+      $(`wc-${side}-logosize-val`).textContent = `${s.logoSize} vw`;
       renderLogoPreview(side, s.logo);
       renderWcOrder(side, s.logoPos);
     }
+    renderPresets();
   }
 
   function renderLogoPreview(side, logo) {
