@@ -21,7 +21,7 @@
   <nav class="modes">
     <button class="mode-btn" data-mode="slideshow">Diashow</button>
     <button class="mode-btn" data-mode="youtube">YouTube-Playlist</button>
-    <button class="mode-btn" data-mode="welcome">Willkommen</button>
+    <button class="mode-btn" data-mode="link">Link</button>
   </nav>
 
   <main>
@@ -64,6 +64,100 @@
 
       <ul id="ss-list" class="media-list"></ul>
       <p class="hint">Reihenfolge per Drag &amp; Drop ändern. Klick auf 🗑 löscht ein Medium.</p>
+
+      <!-- Willkommens-Overlay: wird über die laufende Diashow gelegt
+           (Dual-TV-Begrüßungsscreen: links begrüßende, rechts begrüßte Firma). -->
+      <div class="wc-section">
+        <h3>Willkommens-Overlay</h3>
+        <label class="checkbox">
+          <input type="checkbox" id="wc-visible" />
+          Overlay über der Diashow einblenden
+        </label>
+        <div class="row">
+          <label>Vorlage
+            <select id="wc-template">
+              <option value="elegant">Elegant (dunkel, Serifenschrift)</option>
+              <option value="modern">Modern (hell, minimal)</option>
+              <option value="festive">Festlich (Akzentfarbe)</option>
+            </select>
+          </label>
+          <label>Überschrift-Größe
+            <input type="range" id="wc-fontsize" min="3" max="16" step="0.5" />
+            <span id="wc-fontsize-val"></span>
+          </label>
+          <label>Blur (Hintergrund)
+            <input type="range" id="wc-blur" min="0" max="40" step="1" />
+            <span id="wc-blur-val"></span>
+          </label>
+        </div>
+        <label class="grow">Überschrift (mittig oben)
+          <input type="text" id="wc-headline" />
+        </label>
+        <div class="row">
+          <div class="wc-side-edit">
+            <h4>Linke Seite (begrüßt)</h4>
+            <label class="grow">Text
+              <input type="text" id="wc-left-text" />
+            </label>
+            <div class="row">
+              <label>Textgröße
+                <input type="range" id="wc-left-textsize" min="2" max="12" step="0.2" />
+                <span id="wc-left-textsize-val"></span>
+              </label>
+              <label>Logogröße
+                <input type="range" id="wc-left-logosize" min="5" max="45" step="1" />
+                <span id="wc-left-logosize-val"></span>
+              </label>
+            </div>
+            <div class="wc-logo-row">
+              <img id="wc-left-preview" class="wc-logo-preview" alt="" />
+              <label class="file-btn">
+                Logo wählen
+                <input type="file" id="wc-left-logo" accept="image/*" hidden />
+              </label>
+              <button id="wc-left-logo-del" class="btn ghost">Logo entfernen</button>
+            </div>
+            <div class="wc-order-wrap">
+              <span class="wc-order-label">Reihenfolge (ziehen):</span>
+              <div class="wc-order" id="wc-left-order">
+                <div class="wc-order-item" data-part="logo" draggable="true"><span class="drag">⠿</span> Logo</div>
+                <div class="wc-order-item" data-part="text" draggable="true"><span class="drag">⠿</span> Text</div>
+              </div>
+            </div>
+          </div>
+          <div class="wc-side-edit">
+            <h4>Rechte Seite (zu begrüßen)</h4>
+            <label class="grow">Text
+              <input type="text" id="wc-right-text" />
+            </label>
+            <div class="row">
+              <label>Textgröße
+                <input type="range" id="wc-right-textsize" min="2" max="12" step="0.2" />
+                <span id="wc-right-textsize-val"></span>
+              </label>
+              <label>Logogröße
+                <input type="range" id="wc-right-logosize" min="5" max="45" step="1" />
+                <span id="wc-right-logosize-val"></span>
+              </label>
+            </div>
+            <div class="wc-logo-row">
+              <img id="wc-right-preview" class="wc-logo-preview" alt="" />
+              <label class="file-btn">
+                Logo wählen
+                <input type="file" id="wc-right-logo" accept="image/*" hidden />
+              </label>
+              <button id="wc-right-logo-del" class="btn ghost">Logo entfernen</button>
+            </div>
+            <div class="wc-order-wrap">
+              <span class="wc-order-label">Reihenfolge (ziehen):</span>
+              <div class="wc-order" id="wc-right-order">
+                <div class="wc-order-item" data-part="logo" draggable="true"><span class="drag">⠿</span> Logo</div>
+                <div class="wc-order-item" data-part="text" draggable="true"><span class="drag">⠿</span> Text</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- ===== Modus 2: YouTube ===== -->
@@ -83,29 +177,24 @@
       <p class="hint">Reihenfolge per Drag &amp; Drop ändern.</p>
     </section>
 
-    <!-- ===== Modus 3: Willkommen ===== -->
-    <section class="panel" id="panel-welcome">
-      <h2>Willkommen</h2>
-      <label class="grow">Botschaft
-        <textarea id="wc-text" rows="2"></textarea>
-      </label>
+    <!-- ===== Modus 3: Link ===== -->
+    <section class="panel" id="panel-link">
+      <h2>Link</h2>
       <div class="row">
-        <label>Vorlage
-          <select id="wc-template">
-            <option value="elegant">Elegant (dunkel, Serifenschrift)</option>
-            <option value="modern">Modern (hell, minimal)</option>
-            <option value="festive">Festlich (Akzentfarbe)</option>
-          </select>
+        <label class="grow">Webseiten-Link hinzufügen
+          <input type="text" id="link-input" placeholder="https://… oder example.com" />
         </label>
-        <label>Schriftgröße
-          <input type="range" id="wc-fontsize" min="3" max="16" step="0.5" />
-          <span id="wc-fontsize-val"></span>
-        </label>
-        <label class="checkbox">
-          <input type="checkbox" id="wc-visible" />
-          Sichtbar (eingeblendet)
+        <button id="link-add" class="btn">Hinzufügen</button>
+      </div>
+      <div class="row">
+        <label>Anzeigedauer pro Link (Sekunden)
+          <input type="number" id="link-duration" min="3" max="600" step="1" />
         </label>
       </div>
+      <ul id="link-list" class="media-list"></ul>
+      <p class="hint">Bei mehreren Links wird im Vollbild rotiert; ein einzelner bleibt stehen.
+        Reihenfolge per Drag &amp; Drop ändern, 🗑 löscht. Hinweis: Manche Seiten
+        (z.&nbsp;B. Google, YouTube-Startseite) verbieten die Einbettung und bleiben dann leer.</p>
     </section>
   </main>
 

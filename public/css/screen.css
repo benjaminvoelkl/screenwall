@@ -67,48 +67,128 @@ body.idle { cursor: none; }
   border: 0;
 }
 
-/* --- Modus 3: Willkommen --- */
-.welcome {
+/* --- Modus 3: Link (Vollbild-iframe) --- */
+.link { background: #000; }
+#link-frame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+}
+/* Hinweis, wenn die Seite die Einbettung verbietet. */
+.link-notice {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  background: radial-gradient(circle at 50% 40%, #1c1c24 0%, #0a0a0d 75%);
+}
+.link-notice-box { padding: 0 8vw; }
+.link-notice-title {
+  font-size: 4vw;
+  font-weight: 600;
+  color: #f3e6c4;
+  margin-bottom: 2vh;
+}
+.link-notice-url {
+  font-size: 2vw;
+  color: #9aa0ac;
+  word-break: break-all;
+}
+
+/* --- Willkommens-Overlay (liegt über der Diashow) --- */
+.welcome-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
   display: flex;
   align-items: center;
   justify-content: center;
   text-align: center;
   transition: opacity 0.6s ease;
 }
-.welcome.fade-out { opacity: 0; }
-.welcome-text {
-  padding: 0 6vw;
-  line-height: 1.15;
-  max-width: 100%;
+
+/* Zentrierte Karte mit verwischtem Hintergrund: das laufende Bild scheint
+   gedämpft durch, der Text bleibt gut lesbar. */
+.wc-card {
+  --wc-blur: 18px;
+  width: min(86vw, 1600px);
+  max-height: 86vh;
+  padding: 4vh 4vw;
+  border-radius: 24px;
+  backdrop-filter: blur(var(--wc-blur));
+  -webkit-backdrop-filter: blur(var(--wc-blur));
+  box-shadow: 0 20px 80px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+.wc-headline {
+  line-height: 1.1;
+  margin-bottom: 4vh;
   word-break: break-word;
 }
 
-/* Vorlage: Elegant – dunkel, Serifenschrift, goldener Akzent. */
-.welcome.tpl-elegant {
-  background: radial-gradient(circle at 50% 40%, #1c1c24 0%, #0a0a0d 75%);
+.wc-cols {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
 }
-.welcome.tpl-elegant .welcome-text {
+.wc-side {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2.5vh;
+  min-width: 0;
+}
+/* Feste Bezel-Schutzzone in der Mitte (Spalt zwischen den zwei TVs). */
+.wc-gap {
+  flex: 0 0 8vw;
+}
+.wc-logo {
+  max-width: 80%;
+  max-height: 22vh; /* per Inline-Style aus dem State überschrieben */
+  object-fit: contain;
+}
+.wc-text {
+  line-height: 1.2;
+  word-break: break-word;
+}
+
+/* Vorlage: Elegant – dunkle Karte, Serifenschrift, goldener Akzent. */
+.welcome-overlay.tpl-elegant .wc-card {
+  background: rgba(16, 16, 22, 0.55);
+  border: 1px solid rgba(212, 175, 55, 0.25);
+}
+.welcome-overlay.tpl-elegant .wc-headline,
+.welcome-overlay.tpl-elegant .wc-text {
   font-family: "Georgia", "Times New Roman", serif;
   color: #f3e6c4;
   text-shadow: 0 2px 30px rgba(212, 175, 55, 0.25);
 }
 
-/* Vorlage: Modern – hell, minimal, serifenlos. */
-.welcome.tpl-modern {
-  background: #f6f7f9;
+/* Vorlage: Modern – helle Karte, minimal, serifenlos. */
+.welcome-overlay.tpl-modern .wc-card {
+  background: rgba(246, 247, 249, 0.78);
+  border: 1px solid rgba(0, 0, 0, 0.08);
 }
-.welcome.tpl-modern .welcome-text {
+.welcome-overlay.tpl-modern .wc-headline,
+.welcome-overlay.tpl-modern .wc-text {
   font-family: "Helvetica Neue", Arial, sans-serif;
   font-weight: 300;
   letter-spacing: 0.01em;
   color: #14161a;
 }
 
-/* Vorlage: Festlich – kräftige Akzentfarbe, fett. */
-.welcome.tpl-festive {
-  background: linear-gradient(135deg, #6a1b9a 0%, #d81b60 55%, #f4511e 100%);
+/* Vorlage: Festlich – kräftige Akzent-Tönung, fett. */
+.welcome-overlay.tpl-festive .wc-card {
+  background: linear-gradient(135deg, rgba(106, 27, 154, 0.6) 0%, rgba(216, 27, 96, 0.6) 55%, rgba(244, 81, 30, 0.6) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.2);
 }
-.welcome.tpl-festive .welcome-text {
+.welcome-overlay.tpl-festive .wc-headline,
+.welcome-overlay.tpl-festive .wc-text {
   font-family: "Trebuchet MS", "Segoe UI", sans-serif;
   font-weight: 800;
   color: #fff;

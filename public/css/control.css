@@ -141,6 +141,45 @@ textarea { resize: vertical; }
   font-size: 18px; cursor: pointer; padding: 4px 8px;
 }
 .hint { color: var(--muted); font-size: 13px; margin-top: 12px; }
+.hidden { display: none !important; }
+.link-ok { color: #3ecf6a; }
+.link-bad { color: var(--danger); }
+.link-unknown { color: var(--muted); }
+
+/* Willkommens-Overlay-Bereich innerhalb des Diashow-Panels */
+.wc-section {
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+.wc-section h3 { margin: 0 0 14px; font-size: 16px; }
+.wc-section h4 { margin: 0 0 10px; font-size: 14px; color: var(--muted); }
+.wc-side-edit {
+  flex: 1 1 280px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+}
+.wc-side-edit .grow { margin-bottom: 12px; }
+.wc-logo-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.wc-logo-preview {
+  width: 72px; height: 48px; flex: 0 0 auto;
+  object-fit: contain; border-radius: 6px;
+  background: #fff; border: 1px solid var(--border);
+}
+.wc-logo-row .btn:disabled { opacity: 0.5; cursor: default; }
+.wc-order-wrap { display: flex; align-items: center; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+.wc-order-label { color: var(--muted); font-size: 13px; }
+.wc-order { display: flex; gap: 8px; }
+.wc-order-item {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 8px; padding: 6px 12px; font-size: 14px;
+  cursor: grab; user-select: none;
+}
+.wc-order-item.dragging { opacity: 0.5; }
+.wc-order-item .drag { color: var(--muted); }
 
 /* Crop-Modal */
 .modal {

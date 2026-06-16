@@ -248,17 +248,121 @@
     });
   }
 
-  // ===== Modus 3: Willkommen =============================================
-  $('wc-text').addEventListener('input', (e) =>
-    postState({ welcome: { text: e.target.value } }));
+  // ===== Modus 3: Link ====================================================
+  $('link-duration').addEventListener('change', (e) =>
+    postState({ link: { durationSec: Math.max(3, Number(e.target.value) || 15) } }));
+
+  $('link-add').addEventListener('click', addLink);
+  $('link-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') addLink(); });
+
+  async function addLink() {
+    const url = normalizeUrl($('link-input').value.trim());
+    if (!url) { alert('Bitte eine gültige URL eingeben.'); return; }
+    $('link-input').value = '';
+    // Über eigenen Endpoint: der Server prüft die Einbettbarkeit der Seite.
+    await fetch('/api/link', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url })
+    });
+  }
+
+  // Ergänzt fehlendes Protokoll und prüft grob auf eine gültige URL.
+  function normalizeUrl(input) {
+    if (!input) return null;
+    let s = input;
+    if (!/^https?:\/\//i.test(s)) s = 'https://' + s;
+    try {
+      const u = new URL(s);
+      if (!u.hostname.includes('.')) return null;
+      return u.href;
+    } catch (_) { return null; }
+  }
+
+  function renderLinkList() {
+    const ul = $('link-list');
+    ul.innerHTML = '';
+    for (const it of state.link.items) {
+      const li = document.createElement('li');
+      li.className = 'media-item';
+      li.draggable = true;
+      li.dataset.id = it.id;
+      let status = '<span class="link-ok">✓ einbettbar</span>';
+      if (it.embeddable === false) status = `<span class="link-bad" title="${escapeHtml(it.reason || '')}">⚠ Einbettung blockiert</span>`;
+      else if (it.embeddable !== true) status = '<span class="link-unknown">? nicht geprüft</span>';
+      li.innerHTML = `
+        <span class="drag">⠿</span>
+        <span class="meta">
+          <div class="name">${escapeHtml(it.url)}</div>
+          <div class="type">${status}</div>
+        </span>
+        <button class="del" title="Entfernen">🗑</button>`;
+      li.querySelector('.del').addEventListener('click', () => {
+        postState({ link: { items: state.link.items.filter((x) => x.id !== it.id) } });
+      });
+      ul.appendChild(li);
+    }
+    enableDragReorder(ul, () => {
+      const order = Array.from(ul.children).map((c) => c.dataset.id);
+      const byId = new Map(state.link.items.map((x) => [x.id, x]));
+      postState({ link: { items: order.map((id) => byId.get(id)).filter(Boolean) } });
+    });
+  }
+
+  // ===== Willkommens-Overlay (Teil der Diashow) ==========================
+  $('wc-visible').addEventListener('change', (e) =>
+    postState({ welcome: { visible: e.target.checked } }));
   $('wc-template').addEventListener('change', (e) =>
     postState({ welcome: { template: e.target.value } }));
   $('wc-fontsize').addEventListener('input', (e) => {
     $('wc-fontsize-val').textContent = `${e.target.value} vw`;
     postState({ welcome: { fontSize: Number(e.target.value) } });
   });
-  $('wc-visible').addEventListener('change', (e) =>
-    postState({ welcome: { visible: e.target.checked } }));
+  $('wc-blur').addEventListener('input', (e) => {
+    $('wc-blur-val').textContent = `${e.target.value} px`;
+    postState({ welcome: { blur: Number(e.target.value) } });
+  });
+  $('wc-headline').addEventListener('input', (e) =>
+    postState({ welcome: { headline: e.target.value } }));
+
+  // Pro Seite: Text, Textgröße, Logogröße.
+  for (const side of ['left', 'right']) {
+    $(`wc-${side}-text`).addEventListener('input', (e) =>
+      postState({ welcome: { [side]: { text: e.target.value } } }));
+    $(`wc-${side}-textsize`).addEventListener('input', (e) => {
+      $(`wc-${side}-textsize-val`).textContent = `${e.target.value} vw`;
+      postState({ welcome: { [side]: { textSize: Number(e.target.value) } } });
+    });
+    $(`wc-${side}-logosize`).addEventListener('input', (e) => {
+      $(`wc-${side}-logosize-val`).textContent = `${e.target.value} vh`;
+      postState({ welcome: { [side]: { logoSize: Number(e.target.value) } } });
+    });
+    // Logo-Position (oben/unten) per Drag & Drop der zwei Einträge.
+    enableWcOrder($(`wc-${side}-order`), (parts) =>
+      postState({ welcome: { [side]: { logoPos: parts[0] === 'logo' ? 'top' : 'bottom' } } }));
+  }
+
+  // Logo-Upload je Seite (eigener Endpoint, speichert Dateiname am welcome-State).
+  function bindLogo(side) {
+    $(`wc-${side}-logo`).addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      e.target.value = '';
+      if (!file) return;
+      const fd = new FormData();
+      fd.append('side', side);
+      fd.append('file', file, file.name || 'logo');
+      await fetch('/api/welcome/logo', { method: 'POST', body: fd });
+    });
+    $(`wc-${side}-logo-del`).addEventListener('click', async () => {
+      await fetch('/api/welcome/logo', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ side })
+      });
+    });
+  }
+  bindLogo('left');
+  bindLogo('right');
 
   // ===== Drag & Drop Reorder (gemeinsam) =================================
   function enableDragReorder(container, onDrop) {
@@ -290,6 +394,30 @@
     return closest.el;
   }
 
+  // Mini-Drag&Drop für die zwei Logo/Text-Einträge einer Seite (horizontal).
+  function enableWcOrder(container, onChange) {
+    let dragging = null;
+    container.querySelectorAll('.wc-order-item').forEach((item) => {
+      item.addEventListener('dragstart', () => { dragging = item; item.classList.add('dragging'); });
+      item.addEventListener('dragend', () => {
+        item.classList.remove('dragging');
+        dragging = null;
+        onChange(Array.from(container.children).map((c) => c.dataset.part));
+      });
+    });
+    container.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      if (!dragging) return;
+      const others = [...container.querySelectorAll('.wc-order-item:not(.dragging)')];
+      const after = others.find((c) => {
+        const box = c.getBoundingClientRect();
+        return e.clientX <= box.left + box.width / 2;
+      });
+      if (after == null) container.appendChild(dragging);
+      else container.insertBefore(dragging, after);
+    });
+  }
+
   // ===== Render gesamten Zustand in die UI ===============================
   function render() {
     if (!state) return;
@@ -319,12 +447,47 @@
     setIfNotFocused($('yt-muted'), state.youtube.muted);
     renderYoutubeList();
 
-    // Welcome
-    setIfNotFocused($('wc-text'), state.welcome.text);
-    setIfNotFocused($('wc-template'), state.welcome.template);
-    setIfNotFocused($('wc-fontsize'), state.welcome.fontSize);
-    $('wc-fontsize-val').textContent = `${state.welcome.fontSize} vw`;
-    setIfNotFocused($('wc-visible'), state.welcome.visible);
+    // Link
+    setIfNotFocused($('link-duration'), state.link.durationSec);
+    renderLinkList();
+
+    // Willkommens-Overlay
+    const w = state.welcome;
+    setIfNotFocused($('wc-visible'), w.visible);
+    setIfNotFocused($('wc-template'), w.template);
+    setIfNotFocused($('wc-fontsize'), w.fontSize);
+    $('wc-fontsize-val').textContent = `${w.fontSize} vw`;
+    setIfNotFocused($('wc-blur'), w.blur);
+    $('wc-blur-val').textContent = `${w.blur} px`;
+    setIfNotFocused($('wc-headline'), w.headline);
+    for (const side of ['left', 'right']) {
+      const s = w[side];
+      setIfNotFocused($(`wc-${side}-text`), s.text);
+      setIfNotFocused($(`wc-${side}-textsize`), s.textSize);
+      $(`wc-${side}-textsize-val`).textContent = `${s.textSize} vw`;
+      setIfNotFocused($(`wc-${side}-logosize`), s.logoSize);
+      $(`wc-${side}-logosize-val`).textContent = `${s.logoSize} vh`;
+      renderLogoPreview(side, s.logo);
+      renderWcOrder(side, s.logoPos);
+    }
+  }
+
+  function renderLogoPreview(side, logo) {
+    const img = $(`wc-${side}-preview`);
+    if (logo) { img.src = `/uploads/${logo}`; img.classList.remove('hidden'); }
+    else { img.removeAttribute('src'); img.classList.add('hidden'); }
+    $(`wc-${side}-logo-del`).disabled = !logo;
+  }
+
+  // Die zwei Drag-Einträge so sortieren, dass sie zum logoPos passen.
+  function renderWcOrder(side, logoPos) {
+    const c = $(`wc-${side}-order`);
+    const logo = c.querySelector('[data-part="logo"]');
+    const text = c.querySelector('[data-part="text"]');
+    const first = logoPos === 'bottom' ? text : logo;
+    const second = logoPos === 'bottom' ? logo : text;
+    c.appendChild(first);
+    c.appendChild(second);
   }
 
   // ===== Utils ===========================================================

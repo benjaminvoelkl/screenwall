@@ -6,9 +6,18 @@
   const els = {
     offline: document.getElementById('offline'),
     welcome: document.getElementById('welcome'),
-    welcomeText: document.getElementById('welcome-text'),
+    wcCard: document.querySelector('.wc-card'),
+    wcHeadline: document.getElementById('wc-headline'),
+    wcLeftLogo: document.getElementById('wc-left-logo'),
+    wcLeftText: document.getElementById('wc-left-text'),
+    wcRightLogo: document.getElementById('wc-right-logo'),
+    wcRightText: document.getElementById('wc-right-text'),
     slideshow: document.getElementById('slideshow'),
-    youtube: document.getElementById('youtube')
+    youtube: document.getElementById('youtube'),
+    link: document.getElementById('link'),
+    linkFrame: document.getElementById('link-frame'),
+    linkNotice: document.getElementById('link-notice'),
+    linkNoticeUrl: document.getElementById('link-notice-url')
   };
 
   let current = null; // letzter Zustand
@@ -57,27 +66,60 @@
 
     // Modus-Sichtbarkeit
     const mode = state.mode;
-    toggle(els.welcome, mode === 'welcome');
     toggle(els.slideshow, mode === 'slideshow');
     toggle(els.youtube, mode === 'youtube');
+    toggle(els.link, mode === 'link');
 
-    if (mode === 'welcome') renderWelcome(state.welcome);
+    // Willkommens-Overlay liegt über der Diashow und ist nur dort sichtbar.
+    renderWelcome(state.welcome, mode === 'slideshow');
+
     if (mode === 'slideshow') Slideshow.update(state.slideshow, prev?.slideshow, prev?.mode !== 'slideshow');
     else Slideshow.stop();
 
     if (mode === 'youtube') YT.update(state.youtube, prev?.youtube, prev?.mode !== 'youtube');
     else YT.stop();
+
+    if (mode === 'link') LinkShow.update(state.link, prev?.link, prev?.mode !== 'link');
+    else LinkShow.stop();
   }
 
   function toggle(el, on) { el.classList.toggle('hidden', !on); }
 
-  // ---- Modus 3: Willkommen ------------------------------------------------
-  function renderWelcome(w) {
+  // ---- Willkommens-Overlay (über der Diashow) -----------------------------
+  function renderWelcome(w, slideshowActive) {
+    w = w || {};
+    // Nur über der Diashow und nur wenn eingeschaltet einblenden.
+    const on = slideshowActive && w.visible !== false;
+    toggle(els.welcome, on);
+    if (!on) return;
+
     els.welcome.classList.remove('tpl-elegant', 'tpl-modern', 'tpl-festive');
     els.welcome.classList.add(`tpl-${w.template || 'elegant'}`);
-    els.welcomeText.textContent = w.text || '';
-    els.welcomeText.style.fontSize = `${w.fontSize || 8}vw`;
-    els.welcome.classList.toggle('fade-out', w.visible === false);
+    els.wcCard.style.setProperty('--wc-blur', `${w.blur ?? 18}px`);
+
+    els.wcHeadline.textContent = w.headline || '';
+    els.wcHeadline.style.fontSize = `${w.fontSize || 8}vw`;
+
+    setSide(els.wcLeftLogo, els.wcLeftText, w.left);
+    setSide(els.wcRightLogo, els.wcRightText, w.right);
+  }
+
+  function setSide(logoEl, textEl, side) {
+    side = side || {};
+    if (side.logo) {
+      logoEl.src = `/uploads/${side.logo}`;
+      logoEl.classList.remove('hidden');
+    } else {
+      logoEl.removeAttribute('src');
+      logoEl.classList.add('hidden');
+    }
+    logoEl.style.maxHeight = `${side.logoSize || 22}vh`;
+    textEl.textContent = side.text || '';
+    textEl.style.fontSize = `${side.textSize || 4.8}vw`;
+    // Logo über oder unter dem Text (per Flex-order).
+    const logoBottom = side.logoPos === 'bottom';
+    logoEl.style.order = logoBottom ? '1' : '0';
+    textEl.style.order = logoBottom ? '0' : '1';
   }
 
   // ---- Modus 1: Diashow (eigene Crossfade-Lösung) -------------------------
@@ -267,6 +309,71 @@
     function stop() {
       try { if (player && player.stopVideo) player.stopVideo(); } catch (_) {}
       started = false;
+    }
+
+    return { update, stop };
+  })();
+
+  // ---- Modus 3: Link (Webseiten im Vollbild, rotierend) -------------------
+  const LinkShow = (() => {
+    let timer = null;
+    let idx = 0;
+    let items = [];
+    let cfg = {};
+    let key = '';
+
+    function keyOf(a) { return a.map((x) => `${x.id}:${x.url}`).join('|'); }
+
+    function update(s, _prev, justEntered) {
+      cfg = s || {};
+      items = cfg.items || [];
+      const newKey = keyOf(items);
+      const changed = newKey !== key;
+      key = newKey;
+      if (changed || justEntered) {
+        idx = 0;
+        show();
+        schedule();
+      } else {
+        schedule();
+      }
+    }
+
+    function show() {
+      const it = items[idx];
+      // Vom Server als nicht-einbettbar erkannt -> Hinweis statt schwarzer Seite.
+      const blocked = !!it && it.embeddable === false;
+      toggle(els.linkNotice, blocked);
+      if (blocked) {
+        els.linkNoticeUrl.textContent = it.url;
+        if (els.linkFrame.getAttribute('src') !== 'about:blank') els.linkFrame.src = 'about:blank';
+        return;
+      }
+      const url = it ? it.url : 'about:blank';
+      // Nur neu laden, wenn sich die URL ändert (vermeidet ständiges Neuladen).
+      if (els.linkFrame.getAttribute('src') !== url) els.linkFrame.src = url;
+    }
+
+    function schedule() {
+      clearTimeout(timer);
+      if (items.length <= 1) return; // einzelner Link bleibt stehen
+      timer = setTimeout(next, Math.max(3, cfg.durationSec || 15) * 1000);
+    }
+
+    function next() {
+      if (!items.length) return;
+      idx = (idx + 1) % items.length;
+      show();
+      schedule();
+    }
+
+    function stop() {
+      clearTimeout(timer);
+      timer = null;
+      // Seite entladen, damit Audio/Video im iframe stoppt.
+      if (els.linkFrame.getAttribute('src') && els.linkFrame.getAttribute('src') !== 'about:blank') {
+        els.linkFrame.src = 'about:blank';
+      }
     }
 
     return { update, stop };

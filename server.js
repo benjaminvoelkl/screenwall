@@ -40,7 +40,7 @@ if (!existsSync(UPLOAD_DIR)) mkdirSync(UPLOAD_DIR, { recursive: true });
 //   - Kein Auth/Passwortschutz (rein lokal).
 //   - Mehrere /screen-Geräte gleichzeitig sind erlaubt (WS-Broadcast).
 const DEFAULT_STATE = {
-  mode: 'welcome', // 'slideshow' | 'youtube' | 'welcome'
+  mode: 'slideshow', // 'slideshow' | 'youtube' | 'link'
   slideshow: {
     durationSec: 6,
     // Verhalten bei Video-Slides: 'end' = bis Videoende, 'duration' = feste Dauer.
@@ -55,11 +55,23 @@ const DEFAULT_STATE = {
     muted: true, // Browser erlauben Autoplay meist nur stummgeschaltet.
     videos: [] // [{ id, videoId, title }]
   },
+  // Modus „Link": Webseiten werden nacheinander im Vollbild (iframe) gezeigt.
+  link: {
+    durationSec: 15, // Anzeigedauer pro Link in Sekunden (bei mehreren)
+    items: [] // [{ id, url, title }]
+  },
+  // Willkommens-Overlay, das ÜBER der laufenden Diashow eingeblendet wird
+  // (Dual-TV-Begrüßungsscreen: zentrierte Karte mit Blur-Hintergrund).
   welcome: {
-    text: 'Herzlich Willkommen Gast',
-    template: 'elegant', // 'elegant' | 'modern' | 'festive'
-    fontSize: 8, // in vw
-    visible: true
+    visible: true, // Overlay ein-/ausblenden
+    template: 'elegant', // 'elegant' | 'modern' | 'festive' (nur Schrift/Farbe)
+    fontSize: 8, // Überschrift-Größe in vw
+    blur: 18, // Stärke des Blur-Hintergrunds in px
+    headline: 'Herzlich Willkommen', // zentrale Überschrift oben
+    // Pro Seite: logo (Dateiname), text, Textgröße (vw), Logogröße (vh),
+    // logoPos = 'top' | 'bottom' (Logo über oder unter dem Text, per Drag&Drop).
+    left: { logo: null, text: '', textSize: 4.8, logoSize: 22, logoPos: 'top' },
+    right: { logo: null, text: '', textSize: 4.8, logoSize: 22, logoPos: 'top' }
   }
 };
 
@@ -76,9 +88,12 @@ function loadState() {
       ...loaded,
       slideshow: { ...DEFAULT_STATE.slideshow, ...(loaded.slideshow || {}) },
       youtube: { ...DEFAULT_STATE.youtube, ...(loaded.youtube || {}) },
+      link: { ...DEFAULT_STATE.link, ...(loaded.link || {}) },
       welcome: { ...DEFAULT_STATE.welcome, ...(loaded.welcome || {}) }
     };
     merged.slideshow = normalizeSlideshow(merged.slideshow);
+    merged.welcome = normalizeWelcome(merged.welcome);
+    if (merged.mode === 'welcome') merged.mode = 'slideshow'; // alter Modus entfällt
     return merged;
   } catch (err) {
     console.error('state.json konnte nicht gelesen werden, nutze Defaults:', err.message);
@@ -105,6 +120,30 @@ function normalizeSlideshow(ss) {
   return ss;
 }
 
+// Stellt das Willkommens-Overlay-Modell sicher und migriert alte state.json-
+// Dateien, die noch ein einzelnes `text`-Feld statt Überschrift + Seiten hatten.
+function normalizeWelcome(w) {
+  w = w || {};
+  // Alte Datei (hatte `text` statt `headline`): Text als Überschrift übernehmen.
+  // `text` existiert nur in vor-Migration-Dateien (neue löschen es unten).
+  if (typeof w.text === 'string') w.headline = w.text;
+  if (typeof w.headline !== 'string') w.headline = DEFAULT_STATE.welcome.headline;
+  if (typeof w.blur !== 'number') w.blur = DEFAULT_STATE.welcome.blur;
+  const d = DEFAULT_STATE.welcome.left;
+  for (const side of ['left', 'right']) {
+    const s = w[side] && typeof w[side] === 'object' ? w[side] : {};
+    w[side] = {
+      logo: s.logo || null,
+      text: typeof s.text === 'string' ? s.text : '',
+      textSize: typeof s.textSize === 'number' ? s.textSize : d.textSize,
+      logoSize: typeof s.logoSize === 'number' ? s.logoSize : d.logoSize,
+      logoPos: s.logoPos === 'bottom' ? 'bottom' : 'top'
+    };
+  }
+  delete w.text; // altes Single-Text-Feld entfernen
+  return w;
+}
+
 let state = loadState();
 
 function saveState(s = state) {
@@ -122,11 +161,22 @@ const app = express();
 const server = createServer(app);
 
 app.use(express.json({ limit: '2mb' }));
+// Uploads (UUID-Dateinamen, unveränderlich) dürfen gecacht werden.
 app.use('/uploads', express.static(UPLOAD_DIR));
-app.use(express.static(PUBLIC_DIR));
+// Steuer-/Anzeige-Assets nie hart cachen, damit Code-Updates nach einem Reload
+// sofort greifen (verhindert veraltete screen.js auf Kiosk-Displays).
+app.use(express.static(PUBLIC_DIR, {
+  setHeaders: (res) => res.set('Cache-Control', 'no-cache')
+}));
 
-app.get('/', (req, res) => res.sendFile(join(PUBLIC_DIR, 'index.html')));
-app.get('/screen', (req, res) => res.sendFile(join(PUBLIC_DIR, 'screen.html')));
+app.get('/', (req, res) => {
+  res.set('Cache-Control', 'no-cache');
+  res.sendFile(join(PUBLIC_DIR, 'index.html'));
+});
+app.get('/screen', (req, res) => {
+  res.set('Cache-Control', 'no-cache');
+  res.sendFile(join(PUBLIC_DIR, 'screen.html'));
+});
 
 // Aktuellen Zustand holen (beim Laden von / und /screen).
 app.get('/api/state', (req, res) => res.json(state));
@@ -137,10 +187,21 @@ app.get('/api/state', (req, res) => res.json(state));
 app.post('/api/state', (req, res) => {
   const patch = req.body || {};
   if (typeof patch.mode === 'string') state.mode = patch.mode;
-  for (const key of ['slideshow', 'youtube', 'welcome']) {
+  for (const key of ['slideshow', 'youtube', 'link']) {
     if (patch[key] && typeof patch[key] === 'object') {
       state[key] = { ...state[key], ...patch[key] };
     }
+  }
+  // welcome verschachtelt mergen, damit ein Patch von left/right.text nicht das
+  // gespeicherte left/right.logo überschreibt.
+  if (patch.welcome && typeof patch.welcome === 'object') {
+    const p = patch.welcome;
+    const prev = state.welcome; // vor dem Spread merken, sonst geht logo verloren
+    const next = { ...prev, ...p };
+    for (const side of ['left', 'right']) {
+      next[side] = { ...prev[side], ...(p[side] && typeof p[side] === 'object' ? p[side] : {}) };
+    }
+    state.welcome = next;
   }
   saveState();
   broadcast();
@@ -253,6 +314,101 @@ app.delete('/api/slideshow/sequence/:id', (req, res) => {
   if (state.slideshow.activeSequenceId === removed.id) {
     state.slideshow.activeSequenceId = seqs[0].id;
   }
+  saveState();
+  broadcast();
+  res.json({ ok: true });
+});
+
+// --- Modus „Link": Einbettbarkeit prüfen + Link hinzufügen ------------------
+// Liest die Antwort-Header der Ziel-URL (server-seitig, daher kein CORS-Problem)
+// und entscheidet, ob die Seite sich in ein iframe einbetten lässt.
+// Rückgabe: embeddable = true | false | null (null = Prüfung nicht möglich).
+async function checkEmbeddable(url) {
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 7000);
+    const res = await fetch(url, {
+      method: 'GET',
+      redirect: 'follow',
+      signal: ctrl.signal,
+      headers: { 'User-Agent': 'Mozilla/5.0 (Screenwall)' }
+    });
+    clearTimeout(timer);
+    const xfo = (res.headers.get('x-frame-options') || '').toLowerCase();
+    const csp = (res.headers.get('content-security-policy') || '').toLowerCase();
+    if (xfo.includes('deny') || xfo.includes('sameorigin')) {
+      return { embeddable: false, reason: `X-Frame-Options: ${xfo.trim()}` };
+    }
+    const m = csp.match(/frame-ancestors([^;]*)/);
+    if (m) {
+      const val = m[1].trim();
+      // 'none' oder eine Liste ohne Wildcard/fremde Hosts => nicht einbettbar.
+      if (/'none'/.test(val) || (!val.includes('*') && !/https?:/.test(val))) {
+        return { embeddable: false, reason: `CSP frame-ancestors: ${val}` };
+      }
+    }
+    return { embeddable: true, reason: '' };
+  } catch (err) {
+    return { embeddable: null, reason: 'Prüfung fehlgeschlagen: ' + err.message };
+  }
+}
+
+// Link hinzufügen (mit Einbettbarkeits-Prüfung). Body: { url }.
+app.post('/api/link', async (req, res) => {
+  try {
+    const url = (req.body?.url || '').trim();
+    if (!/^https?:\/\//i.test(url)) return res.status(400).json({ error: 'Ungültige URL' });
+    const { embeddable, reason } = await checkEmbeddable(url);
+    const item = { id: randomUUID(), url, title: url, embeddable, reason };
+    state.link.items.push(item);
+    saveState();
+    broadcast();
+    res.json(item);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Einbettbarkeit eines vorhandenen Links neu prüfen. Body: { id }.
+app.post('/api/link/recheck', async (req, res) => {
+  try {
+    const item = state.link.items.find((x) => x.id === req.body?.id);
+    if (!item) return res.status(404).json({ error: 'Link nicht gefunden' });
+    const { embeddable, reason } = await checkEmbeddable(item.url);
+    item.embeddable = embeddable;
+    item.reason = reason;
+    saveState();
+    broadcast();
+    res.json(item);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Willkommens-Overlay: Logo-Upload je Seite ------------------------------
+// Lädt ein Logo hoch und hängt es an die linke oder rechte Seite (Form-Feld
+// `side` = 'left' | 'right'). Ein eventuell vorhandenes altes Logo wird gelöscht.
+app.post('/api/welcome/logo', upload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Keine Datei empfangen' });
+  const side = req.body.side === 'right' ? 'right' : 'left';
+  const old = state.welcome[side].logo;
+  if (old) {
+    try { unlinkSync(join(UPLOAD_DIR, old)); } catch (_) { /* egal */ }
+  }
+  state.welcome[side].logo = req.file.filename;
+  saveState();
+  broadcast();
+  res.json({ side, logo: req.file.filename });
+});
+
+// Logo einer Seite entfernen. Body: { side: 'left' | 'right' }.
+app.delete('/api/welcome/logo', (req, res) => {
+  const side = req.body?.side === 'right' ? 'right' : 'left';
+  const old = state.welcome[side].logo;
+  if (old) {
+    try { unlinkSync(join(UPLOAD_DIR, old)); } catch (_) { /* egal */ }
+  }
+  state.welcome[side].logo = null;
   saveState();
   broadcast();
   res.json({ ok: true });
