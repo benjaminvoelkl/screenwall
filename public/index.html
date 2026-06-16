@@ -76,10 +76,16 @@
 
         <div class="wc-presets">
           <h4>Presets</h4>
-          <button id="wc-preset-save" class="btn">Aktuelle Einstellung als Preset speichern</button>
-          <ul id="wc-preset-list" class="media-list"></ul>
-          <p class="hint">„Anwenden" lädt ein Preset (überschreibt die aktuelle Gestaltung,
-            ohne das Overlay ein-/auszuschalten). 💾 überschreibt das Preset mit der aktuellen Einstellung.</p>
+          <div class="row">
+            <label class="grow">Gespeichertes Preset
+              <select id="wc-preset-select"></select>
+            </label>
+            <button id="wc-preset-overwrite" class="btn ghost">💾 Überschreiben</button>
+            <button id="wc-preset-delete" class="btn ghost">🗑 Löschen</button>
+          </div>
+          <button id="wc-preset-save" class="btn">Als neues Preset speichern</button>
+          <p class="hint">Auswahl im Dropdown wendet das Preset sofort an (ohne das Overlay ein-/auszuschalten).
+            💾 überschreibt das gewählte Preset mit der aktuellen Gestaltung.</p>
         </div>
         <div class="row">
           <label>Vorlage

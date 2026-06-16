@@ -94,7 +94,10 @@
     toggle(els.welcome, on);
     if (!on) return;
 
-    els.welcome.classList.remove('tpl-elegant', 'tpl-modern', 'tpl-festive');
+    // Alle vorhandenen tpl-*-Klassen entfernen (nicht nur die alten drei),
+    // sonst bleibt beim Umschalten der vorige Stil kleben.
+    [...els.welcome.classList].filter((c) => c.startsWith('tpl-'))
+      .forEach((c) => els.welcome.classList.remove(c));
     els.welcome.classList.add(`tpl-${w.template || 'elegant'}`);
     els.wcCard.style.setProperty('--wc-blur', `${w.blur ?? 18}px`);
 

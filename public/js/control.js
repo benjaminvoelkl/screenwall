@@ -366,44 +366,68 @@
   bindLogo('left');
   bindLogo('right');
 
-  // Presets: aktuelle Gestaltung speichern.
+  // Presets als Dropdown: Auswahl wendet sofort an; Buttons für speichern/
+  // überschreiben/löschen. Die Auswahl wird clientseitig gemerkt.
+  let selectedPresetId = null;
+
+  $('wc-preset-select').addEventListener('change', (e) => {
+    selectedPresetId = e.target.value || null;
+    if (selectedPresetId) fetch(`/api/welcome/preset/${selectedPresetId}/apply`, { method: 'POST' });
+  });
+
   $('wc-preset-save').addEventListener('click', async () => {
     const n = (state.welcome.presets || []).length + 1;
     const name = prompt('Name des Presets:', `Preset ${n}`);
     if (name === null) return;
-    await fetch('/api/welcome/preset', {
+    const r = await fetch('/api/welcome/preset', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name })
     });
+    const created = await r.json();
+    if (created && created.id) selectedPresetId = created.id; // neues gleich auswählen
+  });
+
+  $('wc-preset-overwrite').addEventListener('click', () => {
+    const p = (state.welcome.presets || []).find((x) => x.id === selectedPresetId);
+    if (!p) return;
+    if (confirm(`Preset „${p.name}" mit der aktuellen Gestaltung überschreiben?`))
+      fetch(`/api/welcome/preset/${p.id}/save`, { method: 'POST' });
+  });
+
+  $('wc-preset-delete').addEventListener('click', () => {
+    const p = (state.welcome.presets || []).find((x) => x.id === selectedPresetId);
+    if (!p) return;
+    if (confirm(`Preset „${p.name}" löschen?`)) {
+      fetch(`/api/welcome/preset/${p.id}`, { method: 'DELETE' });
+      selectedPresetId = null;
+    }
   });
 
   function renderPresets() {
-    const ul = $('wc-preset-list');
-    ul.innerHTML = '';
-    for (const p of state.welcome.presets || []) {
-      const li = document.createElement('li');
-      li.className = 'media-item';
-      li.innerHTML = `
-        <span class="meta">
-          <div class="name">${escapeHtml(p.name)}</div>
-          <div class="type">Stil: ${escapeHtml(p.config?.template || '–')}</div>
-        </span>
-        <button class="btn apply">Anwenden</button>
-        <button class="btn ghost overwrite" title="Mit aktueller Einstellung überschreiben">💾</button>
-        <button class="del" title="Löschen">🗑</button>`;
-      li.querySelector('.apply').addEventListener('click', () =>
-        fetch(`/api/welcome/preset/${p.id}/apply`, { method: 'POST' }));
-      li.querySelector('.overwrite').addEventListener('click', () => {
-        if (confirm(`Preset „${p.name}" mit der aktuellen Einstellung überschreiben?`))
-          fetch(`/api/welcome/preset/${p.id}/save`, { method: 'POST' });
-      });
-      li.querySelector('.del').addEventListener('click', () => {
-        if (confirm(`Preset „${p.name}" löschen?`))
-          fetch(`/api/welcome/preset/${p.id}`, { method: 'DELETE' });
-      });
-      ul.appendChild(li);
+    const sel = $('wc-preset-select');
+    const presets = state.welcome.presets || [];
+    if (document.activeElement !== sel) {
+      sel.innerHTML = '';
+      if (!presets.length) {
+        const o = document.createElement('option');
+        o.value = '';
+        o.textContent = '(keine Presets gespeichert)';
+        sel.appendChild(o);
+      } else {
+        for (const p of presets) {
+          const o = document.createElement('option');
+          o.value = p.id;
+          o.textContent = p.name;
+          sel.appendChild(o);
+        }
+      }
+      if (selectedPresetId && presets.some((p) => p.id === selectedPresetId)) sel.value = selectedPresetId;
+      else selectedPresetId = sel.value || null;
     }
+    const canEdit = !!selectedPresetId;
+    $('wc-preset-overwrite').disabled = !canEdit;
+    $('wc-preset-delete').disabled = !canEdit;
   }
 
   // ===== Drag & Drop Reorder (gemeinsam) =================================
