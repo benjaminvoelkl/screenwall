@@ -21,13 +21,7 @@
 
   const els = {
     offline: $('offline'),
-    welcome: $('welcome'),
-    wcCard: document.querySelector('.wc-card'),
-    wcHeadline: $('wc-headline'),
-    wcLeftLogo: $('wc-left-logo'),
-    wcLeftText: $('wc-left-text'),
-    wcRightLogo: $('wc-right-logo'),
-    wcRightText: $('wc-right-text'),
+    overlays: $('overlays'),
     ytLayer: $('yt-layer')
   };
   const slots = [$('slot-0'), $('slot-1')];
@@ -56,7 +50,7 @@
         const msg = JSON.parse(ev.data);
         if (msg.type === 'state') applyState(msg.state);
         else if (msg.type === 'cmd' && msg.cmd === 'seek') seekCurrent(msg.time);
-        else if (msg.type === 'cmd' && msg.cmd === 'goto') gotoEntry(msg.itemId, msg.time);
+        else if (msg.type === 'cmd' && msg.cmd === 'goto') gotoEntry(msg.itemId, msg.time, msg.progTime);
         else if (msg.type === 'cmd' && msg.cmd === 'pause') previewPause();
         else if (msg.type === 'cmd' && msg.cmd === 'play') previewPlay();
         else if (msg.type === 'cmd' && msg.cmd === 'nowplaying') { if (viewer === 'monitor') applyNowPlaying(msg); }
@@ -80,39 +74,98 @@
   function applyState(s) {
     if (!s) return;
     state = s;
-    renderWelcome(s.welcome || {});
+    renderOverlays(s.overlays || []);
     afterStateRebuild();
   }
 
-  function toggle(el, on) { el.classList.toggle('hidden', !on); }
+  // ===== Overlays (mehrere Zeit-Clips über dem Content) ===================
+  // DOM wird bei Statewechsel neu aufgebaut; ein ~250ms-Tick blendet die Layer
+  // passend zur Programmzeit (start/duration) ein/aus.
+  let overlayLayers = [];      // [{ overlay, layerEl }]
+  let dynTimers = [];          // Intervalle dynamischer (url-gebundener) Elemente
 
-  // ===== Willkommens-Overlay (über dem Hintergrund) =======================
-  function renderWelcome(w) {
-    w = w || {};
-    const on = w.visible !== false;
-    toggle(els.welcome, on);
-    if (!on) return;
-    [...els.welcome.classList].filter((c) => c.startsWith('tpl-'))
-      .forEach((c) => els.welcome.classList.remove(c));
-    els.welcome.classList.add(`tpl-${w.template || 'elegant'}`);
-    els.wcCard.style.setProperty('--wc-blur', `${w.blur ?? 18}px`);
-    els.wcHeadline.textContent = w.headline || '';
-    els.wcHeadline.style.fontSize = `${w.fontSize || 8}vw`;
-    setSide(els.wcLeftLogo, els.wcLeftText, w.left);
-    setSide(els.wcRightLogo, els.wcRightText, w.right);
+  function renderOverlays(list) {
+    dynTimers.forEach(clearInterval); dynTimers = [];
+    els.overlays.innerHTML = '';
+    overlayLayers = [];
+    for (const o of list) {
+      const layer = document.createElement('div');
+      layer.className = 'ov-layer hidden';
+      if (o.blur > 0) {
+        const bd = document.createElement('div');
+        bd.className = 'ov-backdrop';
+        bd.style.backdropFilter = bd.style.webkitBackdropFilter = `blur(${o.blur}px)`;
+        layer.appendChild(bd);
+      }
+      for (const e of o.elements) layer.appendChild(buildElement(e));
+      els.overlays.appendChild(layer);
+      overlayLayers.push({ overlay: o, layerEl: layer });
+    }
+    updateOverlayVisibility();
   }
-  function setSide(logoEl, textEl, side) {
-    side = side || {};
-    if (side.logo) { logoEl.src = `/uploads/${side.logo}`; logoEl.classList.remove('hidden'); }
-    else { logoEl.removeAttribute('src'); logoEl.classList.add('hidden'); }
-    logoEl.style.width = `${side.logoSize || 22}vw`;
-    logoEl.style.height = 'auto';
-    textEl.textContent = side.text || '';
-    textEl.style.fontSize = `${side.textSize || 4.8}vw`;
-    const logoBottom = side.logoPos === 'bottom';
-    logoEl.style.order = logoBottom ? '1' : '0';
-    textEl.style.order = logoBottom ? '0' : '1';
+
+  function buildElement(e) {
+    const box = document.createElement('div');
+    box.className = `ov-el ov-${e.type}`;
+    box.style.left = pct(e.x); box.style.top = pct(e.y);
+    box.style.width = pct(e.w); box.style.height = pct(e.h);
+    if (e.type === 'text') {
+      box.classList.add(`align-${e.align || 'center'}`);
+      box.style.color = e.color || '#fff';
+      box.style.fontWeight = e.weight || 700;
+      box.style.fontSize = `${(e.fontFrac || 0.5) * (e.h || 0.1) * 100}vh`;
+      if (e.bg) box.style.background = e.bg;
+      box.textContent = e.text || '';
+      bindDynamic(e, (val) => { box.textContent = val; });
+    } else if (e.type === 'image') {
+      const img = document.createElement('img');
+      img.className = `ov-img ${e.fit || 'contain'}`;
+      img.alt = '';
+      img.src = e.filename ? `/uploads/${e.filename}` : (e.url || '');
+      box.appendChild(img);
+      bindDynamic(e, (val) => { if (val) img.src = val; });
+    } else if (e.type === 'qr') {
+      const img = document.createElement('img');
+      img.className = 'ov-qr'; img.alt = '';
+      const set = (data) => { img.src = `/api/qr?data=${encodeURIComponent(data || ' ')}&fg=${encodeURIComponent(e.fg || '#000')}&bg=${encodeURIComponent(e.bg || '#fff')}`; };
+      set(e.data);
+      box.appendChild(img);
+      bindDynamic(e, (val) => set(val));
+    }
+    return box;
   }
+  const pct = (v) => `${(v || 0) * 100}%`;
+
+  // Dynamische Quelle (Phase 1): periodisch über den Server-Proxy /api/fetch laden.
+  function bindDynamic(e, apply) {
+    const s = e.source;
+    if (!s || s.kind !== 'url' || !s.url) return;
+    const load = async () => {
+      try {
+        const r = await fetch(`/api/fetch?url=${encodeURIComponent(s.url)}`);
+        const ct = r.headers.get('content-type') || '';
+        if (ct.includes('json') && s.jsonPath) {
+          const j = await r.json();
+          apply(String(s.jsonPath.split('.').reduce((a, k) => (a == null ? a : a[k]), j) ?? ''));
+        } else {
+          apply((await r.text()).trim());
+        }
+      } catch (_) {}
+    };
+    load();
+    dynTimers.push(setInterval(load, Math.max(2, s.refreshSec || 60) * 1000));
+  }
+
+  // Aktive Overlays nach Programmzeit ein-/ausblenden.
+  function updateOverlayVisibility() {
+    const t = programTime();
+    for (const { overlay, layerEl } of overlayLayers) {
+      const end = overlay.duration == null ? Infinity : overlay.start + overlay.duration;
+      const active = overlay.enabled && t >= overlay.start && t < end;
+      layerEl.classList.toggle('hidden', !active);
+    }
+  }
+  setInterval(updateOverlayVisibility, 250);
 
   // ===== YouTube-Player (persistent, IFrame-API) ==========================
   const YT = (() => {
@@ -185,6 +238,21 @@
   function pvReset(off, running) { pvBaseMs = Math.max(0, (off || 0) * 1000); pvStartTs = running ? performance.now() : null; }
   function pvPause() { if (pvStartTs != null) { pvBaseMs += performance.now() - pvStartTs; pvStartTs = null; } }
   function pvResume() { if (pvStartTs == null) pvStartTs = performance.now(); }
+
+  // Programmzeit (Sekunden ab Programmstart) – Grundlage für die Overlay-Zeit-Clips.
+  // progBase = Summe bereits gespielter Block-Dauern; + verstrichene Zeit im Content.
+  let progBase = 0;
+  let wallProgTime = 0; // vom Wand-Heartbeat (für viewer 'monitor')
+  function contentElapsed() {
+    if (!current) return 0;
+    if (current.type === 'youtube') { const p = YT.getPos(); return p ? p.time : pvElapsed(); }
+    if (current.videoEl && isFinite(current.videoEl.duration)) return current.videoEl.currentTime || 0;
+    return pvElapsed();
+  }
+  function programTime() {
+    if (viewer === 'monitor') return wallProgTime;
+    return progBase + contentElapsed();
+  }
 
   // Top-Playlist rekursiv ausflachen; verschachtelte Playlists inline einfügen.
   function flatten(plId, byId, visited) {
@@ -279,10 +347,10 @@
       current = { itemId: entry.itemId, type: c.type, content: c, contentJSON: JSON.stringify(c), videoEl: v || null };
     }
 
-    // Vorschau: eigene pausierbare Uhr + Weiterschalten per Tick (siehe previewTick).
-    // Wand: klassisches scheduleAdvance per Timer.
+    // Content-Uhr für alle Sichten starten (Programmzeit/Overlay-Scheduling, und
+    // in der Vorschau pausierbar). Wand: zusätzlich klassisches scheduleAdvance.
+    pvReset(opts.startSeconds || 0, !(isPreview && previewPaused));
     if (isPreview) {
-      pvReset(opts.startSeconds || 0, !previewPaused);
       if (previewPaused) pauseCurrentMedia();
     } else if (autoAdvance) {
       scheduleAdvance(entry);
@@ -372,6 +440,7 @@
   function advance() {
     if (!autoAdvance) return;
     clearTimer();
+    progBase += contentElapsed(); // gespielte Dauer des verlassenen Blocks aufaddieren
     idx++;
     if (idx < seq.length) { showCurrent(); return; }
     applyAfter();
@@ -384,6 +453,7 @@
     if (after === 'next' && pl.nextId && state.playlists.byId[pl.nextId]) topId = pl.nextId;
     rebuild();
     idx = 0;
+    progBase = 0; // Programm beginnt von vorn (Loop/Next)
     seq.length ? showCurrent() : clearStage();
   }
 
@@ -400,7 +470,7 @@
     ws.send(JSON.stringify({
       type: 'cmd', cmd: 'nowplaying',
       contentId: current.itemId, ctype: current.type,
-      videoId: (c && c.videoId) || null, time, duration
+      videoId: (c && c.videoId) || null, time, duration, progTime: programTime()
     }));
   }
 
@@ -408,6 +478,7 @@
   function applyNowPlaying(np) {
     if (viewer !== 'monitor') return;
     if (!np || !np.contentId) return;
+    if (typeof np.progTime === 'number') { wallProgTime = np.progTime; updateOverlayVisibility(); }
     const i = seq.findIndex((e) => e.itemId === np.contentId);
     if (i === -1) return;
     idx = i;
@@ -426,12 +497,16 @@
   // ab `time` Sekunden. Wird von der Programm-Timeline (/programm) beim Scrubbing
   // genutzt: setzt die Vorschau auf den Playhead-Punkt. In der Vorschau läuft danach
   // der Auto-Advance regulär weiter. No-op bei unbekannter itemId.
-  function gotoEntry(itemId, time) {
+  function gotoEntry(itemId, time, progT) {
     if (!itemId) return;
     const i = seq.findIndex((e) => e.itemId === itemId);
     if (i === -1) return;
     idx = i;
-    showContent(seq[i], { startSeconds: Math.max(0, time || 0) });
+    const off = Math.max(0, time || 0);
+    // Programmzeit am Sprungziel setzen, damit Overlay-Scheduling/Playhead passen.
+    progBase = (typeof progT === 'number') ? Math.max(0, progT - off) : progBase;
+    showContent(seq[i], { startSeconds: off });
+    updateOverlayVisibility();
   }
 
   function seekCurrent(time) {

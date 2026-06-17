@@ -8,7 +8,8 @@ einem beliebigen Gerät im selben Netzwerk (Tablet, Handy, Laptop).
   Programm (Zeitstrahl, Scrubbing, Spuren für Content/Musik/Overlay) + „Preview & Go Live".
 - **`/playlists`** – Playlist-Editor: Playlists und Inhalte zusammenstellen/konfigurieren.
 - **`/screen`** – Vollbild-Anzeige (Beamer/Wand): zeigt die veröffentlichte Übertragung.
-- **`/overlay`** – Willkommens-Overlay konfigurieren (liegt über dem Hintergrund).
+- **`/overlay`** – Overlay-Canvas-Editor: mehrere Overlays (Zeit-Clips) mit frei
+  positionierten Elementen (Text/Bild/QR) über dem Hintergrund.
 
 Änderungen auf `/playlists` landen zunächst im **Entwurf** und erscheinen erst per
 **„Preview & Go Live"** (auf `/programm`) auf der Wand. Updates laufen **ohne Neuladen**
@@ -29,8 +30,13 @@ Das Inhaltsmodell ist hierarchisch:
   **Stop** (Standbild) oder **Nächste** (Verweis auf eine andere Playlist).
 - **Start (Wurzel)** – eine Playlist ist als Start markiert und beginnt die Übertragung.
 
-Das **Willkommens-Overlay** (frei schreibbare Botschaft mit wählbaren Vorlagen)
-liegt unverändert **über** dem laufenden Hintergrund und wird unter `/overlay` bearbeitet.
+**Overlays** liegen **über** dem laufenden Hintergrund. Es kann mehrere gleichzeitig
+geben; jedes ist ein **Zeit-Clip** (Startzeit + Dauer, `null` = immer) und besteht aus
+frei positionierten **Elementen** (Text/Bild/QR-Code) auf einem Canvas in Ausgabegröße.
+Bearbeitung im Canvas-Editor unter `/overlay` (mit Snap-Linien), Zeitlage als Clips auf
+der Programm-Timeline (`/programm`). Elemente können optional aus einer externen URL
+gespeist werden (Grundgerüst für Wetter/News; vollständige API folgt). Ein altes
+`welcome`-Overlay wird beim Start automatisch in ein Overlay migriert.
 
 ## Installation & Start
 
@@ -109,15 +115,14 @@ public/
   programm.html        Programm-Timeline /programm (Übersicht + Go Live)
   playlists.html       Playlist-Editor /playlists (Inhalte zusammenstellen)
   screen.html          Anzeige /screen
-  overlay.html         Willkommens-Overlay /overlay
-  css/control.css  css/programm.css  css/monitor.css  css/screen.css
-  js/programm.js   js/playlists.js   js/monitor.js    js/screen.js    js/overlay.js
+  overlay.html         Overlay-Canvas-Editor /overlay
+  css/control.css  css/programm.css  css/overlay.css  css/monitor.css  css/screen.css
+  js/programm.js   js/playlists.js   js/overlay.js    js/monitor.js    js/screen.js
 ```
 
 ## API (intern)
 
 - `GET  /api/state` – Entwurf abrufen (`?view=live` für den Wand-Zustand)
-- `POST /api/state` – Willkommens-Overlay setzen (`{ welcome }`)
 - `POST /api/golive` – Entwurf auf die Wand veröffentlichen
 - `POST /api/playlist` – Playlist anlegen; `/:id/rename`, `DELETE /:id`
 - `POST /api/playlist/root` – Start-Playlist (Wurzel) setzen (`{ id }`)
@@ -129,4 +134,10 @@ public/
 - `POST /api/upload` – Bild/Video hochladen + anhängen (Felder `file`, `playlistId`)
 - `POST /api/link` – Webseiten-Content anhängen (`{ url, playlistId }`); `/api/link/recheck`
 - `POST /api/volume` / `GET /api/volume` – Wand-Systemlautstärke (wpctl)
+- `POST /api/overlay` – Overlay anlegen; `PATCH /:id` (name/enabled/start/duration/blur),
+  `DELETE /:id`, `POST /api/overlays/order`
+- `POST /api/overlay/:id/element` – Element anlegen; `PATCH`/`DELETE /:eid`,
+  `POST /:id/elements/order`, `POST /:id/element/:eid/image` (Bild-Upload)
+- `GET /api/qr?data=…&fg=&bg=` – QR-Code als SVG (offline via `qrcode`)
+- `GET /api/fetch?url=…` – Proxy für externe Datenquellen (Wetter/News; Phase-1)
 - WebSocket auf demselben Port: Server pusht `{ type: 'state', state }` an alle Clients.

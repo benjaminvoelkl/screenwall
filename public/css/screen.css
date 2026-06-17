@@ -96,158 +96,23 @@ body.idle { cursor: none; }
   word-break: break-all;
 }
 
-/* --- Willkommens-Overlay (liegt über der Diashow) --- */
-.welcome-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 500;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  transition: opacity 0.6s ease;
-}
+/* --- Overlays (mehrere Layer über dem Content; Elemente frei positioniert) --- */
+.overlays { position: fixed; inset: 0; z-index: 500; pointer-events: none; }
+.ov-layer { position: absolute; inset: 0; transition: opacity 0.4s ease; }
+.ov-layer.hidden { display: none; }
+.ov-backdrop { position: absolute; inset: 0; }
 
-/* Zentrierte Karte mit verwischtem Hintergrund: das laufende Bild scheint
-   gedämpft durch, der Text bleibt gut lesbar. */
-.wc-card {
-  --wc-blur: 18px;
-  width: 94vw; /* fast bildschirmfüllend – wichtig für große 4K-Wände */
-  max-width: none;
-  max-height: 92vh;
-  padding: 5vh 3vw;
-  border-radius: 24px;
-  backdrop-filter: blur(var(--wc-blur));
-  -webkit-backdrop-filter: blur(var(--wc-blur));
-  box-shadow: 0 20px 80px rgba(0, 0, 0, 0.45);
-  overflow: hidden;
+/* Element: per Bruchteil (0..1) des Ausgabebilds positioniert/dimensioniert. */
+.ov-el { position: absolute; overflow: hidden; }
+.ov-text {
+  display: flex; align-items: center;
+  line-height: 1.1; word-break: break-word; white-space: pre-wrap;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.45);
 }
-
-.wc-headline {
-  line-height: 1.1;
-  margin-bottom: 4vh;
-  word-break: break-word;
-}
-
-.wc-cols {
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-}
-.wc-side {
-  flex: 1 1 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2.5vh;
-  min-width: 0;
-}
-/* Bezel-Schutzzone in der Mitte – vorerst deaktiviert (eine logische Fläche). */
-.wc-gap {
-  flex: 0 0 0;
-}
-.wc-logo {
-  /* Größe wird per Inline-Style (Breite in vw) aus dem State gesetzt; die
-     Breite wirkt bei jedem Seitenverhältnis. max-height verhindert nur, dass
-     sehr hohe Logos die Karte sprengen. */
-  max-width: 100%;
-  max-height: 90vh;
-  object-fit: contain;
-}
-.wc-text {
-  line-height: 1.2;
-  word-break: break-word;
-}
-
-/* Vorlage: Elegant – dunkle Karte, Serifenschrift, goldener Akzent. */
-.welcome-overlay.tpl-elegant .wc-card {
-  background: rgba(16, 16, 22, 0.55);
-  border: 1px solid rgba(212, 175, 55, 0.25);
-}
-.welcome-overlay.tpl-elegant .wc-headline,
-.welcome-overlay.tpl-elegant .wc-text {
-  font-family: "Georgia", "Times New Roman", serif;
-  color: #f3e6c4;
-  text-shadow: 0 2px 30px rgba(212, 175, 55, 0.25);
-}
-
-/* Vorlage: Modern – helle Karte, minimal, serifenlos. */
-.welcome-overlay.tpl-modern .wc-card {
-  background: rgba(246, 247, 249, 0.78);
-  border: 1px solid rgba(0, 0, 0, 0.08);
-}
-.welcome-overlay.tpl-modern .wc-headline,
-.welcome-overlay.tpl-modern .wc-text {
-  font-family: "Helvetica Neue", Arial, sans-serif;
-  font-weight: 300;
-  letter-spacing: 0.01em;
-  color: #14161a;
-}
-
-/* Vorlage: Festlich – kräftige Akzent-Tönung, fett. */
-.welcome-overlay.tpl-festive .wc-card {
-  background: linear-gradient(135deg, rgba(106, 27, 154, 0.6) 0%, rgba(216, 27, 96, 0.6) 55%, rgba(244, 81, 30, 0.6) 100%);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-}
-.welcome-overlay.tpl-festive .wc-headline,
-.welcome-overlay.tpl-festive .wc-text {
-  font-family: "Trebuchet MS", "Segoe UI", sans-serif;
-  font-weight: 800;
-  color: #fff;
-  text-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
-}
-
-/* Vorlage: Dunkel – fast schwarze Karte, klarer weißer Text. */
-.welcome-overlay.tpl-dark .wc-card {
-  background: rgba(0, 0, 0, 0.62);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-}
-.welcome-overlay.tpl-dark .wc-headline,
-.welcome-overlay.tpl-dark .wc-text {
-  font-family: "Segoe UI", system-ui, sans-serif;
-  font-weight: 600;
-  color: #ffffff;
-  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.6);
-}
-
-/* Vorlage: Corporate – helle Karte, sachlich, blauer Akzent. */
-.welcome-overlay.tpl-corporate .wc-card {
-  background: rgba(255, 255, 255, 0.88);
-  border: 1px solid rgba(11, 42, 74, 0.15);
-}
-.welcome-overlay.tpl-corporate .wc-headline {
-  font-family: "Helvetica Neue", Arial, sans-serif;
-  font-weight: 700;
-  color: #0b2a4a;
-}
-.welcome-overlay.tpl-corporate .wc-text {
-  font-family: "Helvetica Neue", Arial, sans-serif;
-  font-weight: 400;
-  color: #1f4e79;
-}
-
-/* Vorlage: Kontrast – maximale Lesbarkeit, weiß auf tiefschwarz, fett. */
-.welcome-overlay.tpl-contrast .wc-card {
-  background: rgba(0, 0, 0, 0.82);
-  border: 2px solid #ffffff;
-}
-.welcome-overlay.tpl-contrast .wc-headline,
-.welcome-overlay.tpl-contrast .wc-text {
-  font-family: "Arial Black", "Segoe UI", sans-serif;
-  font-weight: 900;
-  letter-spacing: 0.01em;
-  color: #ffffff;
-}
-
-/* Vorlage: Weihnachten – tiefrot/grün, goldener Text. */
-.welcome-overlay.tpl-christmas .wc-card {
-  background: linear-gradient(135deg, rgba(122, 16, 16, 0.7) 0%, rgba(15, 61, 30, 0.7) 100%);
-  border: 1px solid rgba(212, 175, 55, 0.4);
-}
-.welcome-overlay.tpl-christmas .wc-headline,
-.welcome-overlay.tpl-christmas .wc-text {
-  font-family: "Georgia", "Times New Roman", serif;
-  font-weight: 700;
-  color: #f6e3a1;
-  text-shadow: 0 2px 20px rgba(0, 0, 0, 0.45);
-}
+.ov-text.align-left { justify-content: flex-start; text-align: left; }
+.ov-text.align-center { justify-content: center; text-align: center; }
+.ov-text.align-right { justify-content: flex-end; text-align: right; }
+.ov-img, .ov-qr { width: 100%; height: 100%; display: block; }
+.ov-img.contain { object-fit: contain; }
+.ov-img.cover { object-fit: cover; }

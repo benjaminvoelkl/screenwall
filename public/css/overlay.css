@@ -1,0 +1,72 @@
+/* Overlay-Canvas-Editor (/overlay). Baut auf control.css auf (Topbar, Buttons,
+   Inputs, Panels) und ergänzt Editor-Layout, Canvas und Snap-Linien. */
+
+.ed-layout { display: flex; align-items: flex-start; gap: 16px; padding: 16px 20px; max-width: 1500px; margin: 0 auto; }
+.ed-side {
+  flex: 0 0 340px; max-height: calc(100vh - 90px); overflow-y: auto;
+  display: flex; flex-direction: column; gap: 14px;
+}
+.ed-main { flex: 1 1 auto; min-width: 0; display: flex; justify-content: center; }
+
+.ed-box { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+.ed-box h3 { margin: 0 0 10px; font-size: 15px; }
+.ed-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.ed-row + .ed-row { margin-top: 8px; }
+.ed-muted { color: var(--muted); font-size: 12px; }
+
+/* Overlay-/Element-Listen */
+.ed-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.ed-item {
+  display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; cursor: pointer;
+}
+.ed-item.sel { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.ed-item .ed-name { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ed-item .ed-tag { color: var(--muted); font-size: 11px; }
+.ed-item input[type="checkbox"] { cursor: pointer; }
+.ed-item.disabled .ed-name { color: var(--muted); }
+
+.ed-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.ed-field input[type="text"], .ed-field input[type="number"], .ed-field select, .ed-field textarea { width: 100%; }
+.ed-field.inline { flex-direction: row; align-items: center; gap: 6px; }
+.ed-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.ed-color { width: 38px; height: 30px; padding: 2px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; }
+.btn.tiny { padding: 5px 10px; font-size: 12px; }
+
+/* Canvas / Bühne (18:16, exakt skaliert wie die Live-Vorschau) */
+.ov-stage { position: relative; background: #000; border-radius: 8px; overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,0.5); }
+.ov-canvas { position: absolute; top: 0; left: 0; width: 4320px; height: 3840px; transform-origin: top left; }
+
+/* gerenderte Elemente im Canvas */
+.ed-el { position: absolute; overflow: hidden; cursor: move; }
+.ed-el.text { display: flex; line-height: 1.1; word-break: break-word; white-space: pre-wrap;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; text-shadow: 0 2px 18px rgba(0,0,0,0.45); }
+.ed-el.text.align-left { justify-content: flex-start; text-align: left; }
+.ed-el.text.align-center { justify-content: center; text-align: center; }
+.ed-el.text.align-right { justify-content: flex-end; text-align: right; }
+.ed-el img { width: 100%; height: 100%; display: block; }
+.ed-el img.contain { object-fit: contain; }
+.ed-el img.cover { object-fit: cover; }
+.ed-el.empty { outline: 2px dashed rgba(255,255,255,0.25); }
+
+/* Auswahlrahmen + Griffe (in Bühnen-Pixeln, unabhängig vom Canvas-Zoom) */
+.ed-selbox { position: absolute; border: 1.5px solid var(--accent); pointer-events: none; z-index: 20; }
+.ed-handle {
+  position: absolute; width: 12px; height: 12px; background: #fff; border: 1.5px solid var(--accent);
+  border-radius: 2px; pointer-events: auto; z-index: 21;
+}
+.ed-handle.nw { left: -6px; top: -6px; cursor: nwse-resize; }
+.ed-handle.ne { right: -6px; top: -6px; cursor: nesw-resize; }
+.ed-handle.sw { left: -6px; bottom: -6px; cursor: nesw-resize; }
+.ed-handle.se { right: -6px; bottom: -6px; cursor: nwse-resize; }
+.ed-handle.n { left: 50%; top: -6px; margin-left: -6px; cursor: ns-resize; }
+.ed-handle.s { left: 50%; bottom: -6px; margin-left: -6px; cursor: ns-resize; }
+.ed-handle.w { left: -6px; top: 50%; margin-top: -6px; cursor: ew-resize; }
+.ed-handle.e { right: -6px; top: 50%; margin-top: -6px; cursor: ew-resize; }
+
+/* Snap-/Orientierungslinien (Bühnen-Koordinaten) */
+.ed-guide { position: absolute; z-index: 15; pointer-events: none; background: #ff3bd0; }
+.ed-guide.v { width: 1px; top: 0; bottom: 0; }
+.ed-guide.h { height: 1px; left: 0; right: 0; }
+
+.ed-empty-hint { color: var(--muted); font-size: 13px; padding: 6px 2px; }

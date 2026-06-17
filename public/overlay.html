@@ -3,131 +3,58 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Screenwall – Willkommens-Overlay</title>
+  <title>Screenwall – Overlays</title>
   <link rel="stylesheet" href="/css/control.css" />
+  <link rel="stylesheet" href="/css/overlay.css" />
 </head>
 <body>
   <header class="topbar">
     <div class="topbar-title">
       <a class="back-link" href="/programm" title="Zur Programm-Timeline">← Programm</a>
-      <h1>Willkommens-Overlay</h1>
+      <h1>Overlays</h1>
     </div>
     <div class="topbar-actions">
-      <button id="go-live" class="go-live hidden" title="Entwurf auf die Wand veröffentlichen">
-        ● Go Live
-      </button>
+      <button id="go-live" class="go-live hidden" title="Entwurf auf die Wand veröffentlichen">● Go Live</button>
     </div>
   </header>
 
-  <main>
-    <section class="panel active">
-      <p class="hint">Wird auf der Wand über dem aktuell laufenden Modus (Diashow, YouTube oder Webseite) eingeblendet.</p>
-      <div class="wc-section-inner">
-        <label class="checkbox">
-          <input type="checkbox" id="wc-visible" />
-          Overlay einblenden (über jedem Modus)
-        </label>
+  <main class="ed-layout">
+    <aside class="ed-side">
+      <!-- Overlay-Liste -->
+      <div class="ed-box">
+        <h3>Overlays</h3>
+        <div id="ov-list" class="ed-list"></div>
+        <button id="ov-add" class="btn">+ Overlay</button>
+      </div>
 
-        <div class="row">
-          <label class="grow">Vorlage
-            <select id="wc-template">
-              <optgroup label="Stile">
-                <option value="style:elegant">Elegant (dunkel, Serifenschrift)</option>
-                <option value="style:modern">Modern (hell, minimal)</option>
-                <option value="style:festive">Festlich (Akzentfarbe)</option>
-                <option value="style:dark">Dunkel (schwarz, weißer Text)</option>
-                <option value="style:corporate">Corporate (hell, blau, sachlich)</option>
-                <option value="style:contrast">Kontrast (weiß auf schwarz, fett)</option>
-                <option value="style:christmas">Weihnachten (rot/grün, gold)</option>
-              </optgroup>
-              <optgroup label="Eigene Vorlagen" id="wc-template-presets" hidden></optgroup>
-            </select>
-          </label>
-          <button id="wc-preset-save" class="btn">Speichern</button>
-          <button id="wc-preset-delete" class="btn ghost">Löschen</button>
+      <!-- Eigenschaften des gewählten Overlays -->
+      <div class="ed-box" id="ov-props-box" hidden>
+        <h3>Overlay-Einstellungen</h3>
+        <div id="ov-props"></div>
+      </div>
+
+      <!-- Elemente des gewählten Overlays -->
+      <div class="ed-box" id="el-box" hidden>
+        <h3>Elemente</h3>
+        <div class="ed-row" style="margin-bottom:10px">
+          <button class="btn tiny" data-add-el="text">+ Text</button>
+          <button class="btn tiny" data-add-el="image">+ Bild</button>
+          <button class="btn tiny" data-add-el="qr">+ QR-Code</button>
         </div>
-        <p class="hint">Auswahl wendet sofort an. „Speichern" legt die aktuelle Gestaltung als
-          eigene Vorlage an (erscheint hier im Dropdown). „Löschen" entfernt die gewählte eigene Vorlage.</p>
-        <div class="row">
-          <label>Überschrift-Größe
-            <input type="range" id="wc-fontsize" min="3" max="28" step="0.5" />
-            <span id="wc-fontsize-val"></span>
-          </label>
-          <label>Blur (Hintergrund)
-            <input type="range" id="wc-blur" min="0" max="40" step="1" />
-            <span id="wc-blur-val"></span>
-          </label>
-        </div>
-        <label class="grow">Überschrift (mittig oben)
-          <input type="text" id="wc-headline" />
-        </label>
-        <div class="row">
-          <div class="wc-side-edit">
-            <h4>Linke Seite (begrüßt)</h4>
-            <label class="grow">Text
-              <input type="text" id="wc-left-text" />
-            </label>
-            <div class="row">
-              <label>Textgröße
-                <input type="range" id="wc-left-textsize" min="2" max="24" step="0.2" />
-                <span id="wc-left-textsize-val"></span>
-              </label>
-              <label>Logogröße
-                <input type="range" id="wc-left-logosize" min="3" max="48" step="0.5" />
-                <span id="wc-left-logosize-val"></span>
-              </label>
-            </div>
-            <div class="wc-logo-row">
-              <img id="wc-left-preview" class="wc-logo-preview" alt="" />
-              <label class="file-btn">
-                Logo wählen
-                <input type="file" id="wc-left-logo" accept="image/*" hidden />
-              </label>
-              <button id="wc-left-logo-del" class="btn ghost">Logo entfernen</button>
-            </div>
-            <div class="wc-order-wrap">
-              <span class="wc-order-label">Reihenfolge (ziehen):</span>
-              <div class="wc-order" id="wc-left-order">
-                <div class="wc-order-item" data-part="logo" draggable="true"><span class="drag">⠿</span> Logo</div>
-                <div class="wc-order-item" data-part="text" draggable="true"><span class="drag">⠿</span> Text</div>
-              </div>
-            </div>
-          </div>
-          <div class="wc-side-edit">
-            <h4>Rechte Seite (zu begrüßen)</h4>
-            <label class="grow">Text
-              <input type="text" id="wc-right-text" />
-            </label>
-            <div class="row">
-              <label>Textgröße
-                <input type="range" id="wc-right-textsize" min="2" max="24" step="0.2" />
-                <span id="wc-right-textsize-val"></span>
-              </label>
-              <label>Logogröße
-                <input type="range" id="wc-right-logosize" min="3" max="48" step="0.5" />
-                <span id="wc-right-logosize-val"></span>
-              </label>
-            </div>
-            <div class="wc-logo-row">
-              <img id="wc-right-preview" class="wc-logo-preview" alt="" />
-              <label class="file-btn">
-                Logo wählen
-                <input type="file" id="wc-right-logo" accept="image/*" hidden />
-              </label>
-              <button id="wc-right-logo-del" class="btn ghost">Logo entfernen</button>
-            </div>
-            <div class="wc-order-wrap">
-              <span class="wc-order-label">Reihenfolge (ziehen):</span>
-              <div class="wc-order" id="wc-right-order">
-                <div class="wc-order-item" data-part="logo" draggable="true"><span class="drag">⠿</span> Logo</div>
-                <div class="wc-order-item" data-part="text" draggable="true"><span class="drag">⠿</span> Text</div>
-              </div>
-            </div>
-          </div>
-        </div>
+        <div id="el-list" class="ed-list"></div>
+        <div id="el-props"></div>
+      </div>
+    </aside>
+
+    <section class="ed-main">
+      <div id="ov-stage" class="ov-stage">
+        <div id="ov-canvas" class="ov-canvas"></div>
       </div>
     </section>
   </main>
+
+  <!-- versteckter Datei-Input für Bild-Upload eines Elements -->
+  <input type="file" id="el-image-input" accept="image/*" hidden />
 
   <script src="/js/overlay.js"></script>
 </body>

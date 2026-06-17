@@ -27,6 +27,7 @@ import { dirname, join, extname } from 'path';
 import { randomUUID } from 'crypto';
 import { networkInterfaces } from 'os';
 import { execFile } from 'child_process';
+import QRCode from 'qrcode';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
@@ -47,6 +48,8 @@ if (!existsSync(UPLOAD_DIR)) mkdirSync(UPLOAD_DIR, { recursive: true });
 // Zustands-Modell
 // ---------------------------------------------------------------------------
 const CONTENT_TYPES = ['color', 'image', 'video', 'youtube', 'webpage', 'screenshare'];
+// Overlay-Elementtypen (liegen ÜBER dem Content; frei auf dem Ausgabe-Canvas platziert).
+const ELEMENT_TYPES = ['text', 'image', 'qr'];
 
 const DEFAULT_STATE = {
   // Playlists als flache Registry (byId) + Wurzel-Playlist (rootId).
@@ -56,17 +59,8 @@ const DEFAULT_STATE = {
       'pl-default': { id: 'pl-default', name: 'Playlist 1', after: 'loop', nextId: null, items: [] }
     }
   },
-  // Willkommens-Overlay (liegt ÜBER dem Hintergrund; KEIN Content-Typ).
-  welcome: {
-    visible: true,
-    template: 'elegant',
-    fontSize: 8,
-    blur: 18,
-    headline: 'Herzlich Willkommen',
-    left: { logo: null, text: '', textSize: 4.8, logoSize: 22, logoPos: 'top' },
-    right: { logo: null, text: '', textSize: 4.8, logoSize: 22, logoPos: 'top' },
-    presets: []
-  }
+  // Overlays: mehrere Zeit-Clips über dem Content (Array = Z-Ordnung, 0 = unten).
+  overlays: []
 };
 
 const newId = () => randomUUID();
@@ -164,6 +158,87 @@ function normalizePlaylists(p) {
   return { rootId, byId };
 }
 
+// ---- Overlays / Elemente normalisieren -------------------------------------
+function clamp01(n, d) { n = (typeof n === 'number' && isFinite(n)) ? n : d; return Math.max(0, Math.min(1, n)); }
+
+// Externe Datenquelle eines Elements (Phase-1-Vorbereitung für Wetter/News).
+function normalizeSource(s) {
+  s = (s && typeof s === 'object') ? s : {};
+  const kind = s.kind === 'url' ? 'url' : 'static';
+  if (kind !== 'url') return { kind: 'static' };
+  return {
+    kind: 'url',
+    url: typeof s.url === 'string' ? s.url : '',
+    refreshSec: (typeof s.refreshSec === 'number' && s.refreshSec >= 2) ? s.refreshSec : 60,
+    jsonPath: typeof s.jsonPath === 'string' ? s.jsonPath : ''
+  };
+}
+
+// Ein Overlay-Element: Position/Größe als Bruchteile (0..1) des Ausgabebilds.
+function normalizeElement(e) {
+  e = (e && typeof e === 'object') ? e : {};
+  const type = ELEMENT_TYPES.includes(e.type) ? e.type : 'text';
+  const out = {
+    id: typeof e.id === 'string' ? e.id : newId(),
+    type,
+    x: clamp01(e.x, 0.1), y: clamp01(e.y, 0.1),
+    w: clamp01(e.w, 0.3), h: clamp01(e.h, 0.15),
+    source: normalizeSource(e.source)
+  };
+  if (type === 'text') {
+    out.text = typeof e.text === 'string' ? e.text : '';
+    out.color = typeof e.color === 'string' ? e.color : '#ffffff';
+    out.bg = typeof e.bg === 'string' ? e.bg : '';            // '' = transparent
+    out.align = ['left', 'center', 'right'].includes(e.align) ? e.align : 'center';
+    out.weight = typeof e.weight === 'number' ? e.weight : 700;
+    out.fontFrac = (typeof e.fontFrac === 'number' && e.fontFrac > 0) ? e.fontFrac : 0.5; // Anteil der Elementhöhe
+  } else if (type === 'image') {
+    out.filename = typeof e.filename === 'string' ? e.filename : null;
+    out.url = typeof e.url === 'string' ? e.url : '';
+    out.fit = e.fit === 'cover' ? 'cover' : 'contain';
+  } else if (type === 'qr') {
+    out.data = typeof e.data === 'string' ? e.data : '';
+    out.fg = typeof e.fg === 'string' ? e.fg : '#000000';
+    out.bg = typeof e.bg === 'string' ? e.bg : '#ffffff';
+  }
+  return out;
+}
+
+function normalizeOverlay(o) {
+  o = (o && typeof o === 'object') ? o : {};
+  return {
+    id: typeof o.id === 'string' ? o.id : newId(),
+    name: typeof o.name === 'string' ? o.name : 'Overlay',
+    enabled: o.enabled !== false,
+    start: (typeof o.start === 'number' && o.start >= 0) ? o.start : 0,
+    duration: (typeof o.duration === 'number' && o.duration > 0) ? o.duration : null, // null = ganzes Programm
+    blur: (typeof o.blur === 'number' && o.blur >= 0) ? o.blur : 0,
+    elements: Array.isArray(o.elements) ? o.elements.map(normalizeElement) : []
+  };
+}
+function normalizeOverlays(arr) { return Array.isArray(arr) ? arr.map(normalizeOverlay) : []; }
+
+// Altes Willkommens-Overlay (welcome.*) in ein Overlay mit Elementen überführen.
+function overlayFromWelcome(w) {
+  w = w || {};
+  const els = [];
+  if (w.headline) {
+    els.push(normalizeElement({ type: 'text', text: w.headline, x: 0.1, y: 0.06, w: 0.8, h: 0.14, align: 'center', color: '#ffffff', fontFrac: 0.7 }));
+  }
+  const baseX = { left: 0.08, right: 0.56 };
+  for (const side of ['left', 'right']) {
+    const s = w[side] || {};
+    const x = baseX[side];
+    const logoTop = s.logoPos !== 'bottom';
+    if (s.logo) els.push(normalizeElement({ type: 'image', filename: s.logo, x, y: logoTop ? 0.32 : 0.62, w: 0.36, h: 0.26, fit: 'contain' }));
+    if (s.text) els.push(normalizeElement({ type: 'text', text: s.text, x, y: logoTop ? 0.62 : 0.32, w: 0.36, h: 0.1, align: 'center', color: '#ffffff', fontFrac: 0.6 }));
+  }
+  return normalizeOverlay({
+    name: 'Willkommen', enabled: w.visible !== false, start: 0, duration: null,
+    blur: typeof w.blur === 'number' ? w.blur : 18, elements: els
+  });
+}
+
 // Alte (modus-basierte) state.json/live.json in das Playlist-Modell überführen.
 // Gibt ein {rootId, byId} zurück oder null, wenn nichts zu migrieren ist.
 function migrateLegacy(loaded) {
@@ -235,8 +310,11 @@ function prepareState(loaded) {
     const migrated = migrateLegacy(loaded);
     playlists = migrated ? normalizePlaylists(migrated) : structuredClone(DEFAULT_STATE.playlists);
   }
-  const welcome = normalizeWelcome({ ...structuredClone(DEFAULT_STATE.welcome), ...(loaded.welcome || {}) });
-  return { playlists, welcome };
+  let overlays;
+  if (Array.isArray(loaded.overlays)) overlays = normalizeOverlays(loaded.overlays);
+  else if (loaded.welcome) overlays = [overlayFromWelcome(loaded.welcome)]; // Migration aus altem welcome
+  else overlays = [];
+  return { playlists, overlays };
 }
 
 function loadState() {
@@ -263,48 +341,6 @@ function loadLive() {
   }
 }
 
-// Stellt das Willkommens-Overlay-Modell sicher und migriert alte Dateien.
-function normalizeWelcome(w) {
-  w = w || {};
-  if (typeof w.text === 'string') w.headline = w.text; // alte Datei
-  if (typeof w.headline !== 'string') w.headline = DEFAULT_STATE.welcome.headline;
-  if (typeof w.blur !== 'number') w.blur = DEFAULT_STATE.welcome.blur;
-  const d = DEFAULT_STATE.welcome.left;
-  for (const side of ['left', 'right']) {
-    const s = w[side] && typeof w[side] === 'object' ? w[side] : {};
-    w[side] = {
-      logo: s.logo || null,
-      text: typeof s.text === 'string' ? s.text : '',
-      textSize: typeof s.textSize === 'number' ? s.textSize : d.textSize,
-      logoSize: typeof s.logoSize === 'number' ? s.logoSize : d.logoSize,
-      logoPos: s.logoPos === 'bottom' ? 'bottom' : 'top'
-    };
-  }
-  if (!Array.isArray(w.presets)) w.presets = [];
-  delete w.text;
-  return w;
-}
-
-function welcomeConfigSnapshot(w) {
-  return {
-    template: w.template,
-    fontSize: w.fontSize,
-    blur: w.blur,
-    headline: w.headline,
-    left: { ...w.left },
-    right: { ...w.right }
-  };
-}
-
-function logoUsedIn(w, filename) {
-  if (!w) return false;
-  if (w.left?.logo === filename || w.right?.logo === filename) return true;
-  for (const p of w.presets || []) {
-    if (p.config?.left?.logo === filename || p.config?.right?.logo === filename) return true;
-  }
-  return false;
-}
-
 // Alle von Contents referenzierten Upload-Dateinamen einer Playlist-Registry.
 function filesUsedInPlaylists(playlists) {
   const set = new Set();
@@ -318,15 +354,32 @@ function filesUsedInPlaylists(playlists) {
   return set;
 }
 
+// Alle von Image-Elementen referenzierten Upload-Dateinamen.
+function filesUsedInOverlays(overlays) {
+  const set = new Set();
+  for (const o of overlays || []) {
+    for (const e of o.elements || []) if (e.type === 'image' && e.filename) set.add(e.filename);
+  }
+  return set;
+}
+
 // Wird eine Upload-Datei noch irgendwo (Entwurf ODER Live; Contents ODER
-// Welcome-Logos) referenziert? Verhindert das Löschen noch genutzter Dateien.
+// Overlay-Bilder) referenziert? Verhindert das Löschen noch genutzter Dateien.
 function fileInUse(filename) {
   if (!filename) return false;
   if (filesUsedInPlaylists(state.playlists).has(filename)) return true;
   if (live && filesUsedInPlaylists(live.playlists).has(filename)) return true;
-  if (logoUsedIn(state.welcome, filename)) return true;
-  if (live && logoUsedIn(live.welcome, filename)) return true;
+  if (filesUsedInOverlays(state.overlays).has(filename)) return true;
+  if (live && filesUsedInOverlays(live.overlays).has(filename)) return true;
   return false;
+}
+
+// Eine Upload-Datei löschen, falls sie nirgends mehr referenziert wird.
+function cleanupFile(filename) {
+  if (filename && !fileInUse(filename)) {
+    try { unlinkSync(join(UPLOAD_DIR, filename)); }
+    catch (err) { console.warn('Datei konnte nicht gelöscht werden:', err.message); }
+  }
 }
 
 let state = loadState(); // Entwurf
@@ -342,6 +395,7 @@ if (!existsSync(LIVE_FILE)) saveLive();
 
 // ---- Playlist-Helfer -------------------------------------------------------
 function getPlaylist(id) { return state.playlists.byId[id]; }
+function getOverlay(id) { return state.overlays.find((o) => o.id === id); }
 
 // Erreicht `fromId` über Verschachtelung `targetId`? (für Zyklusprüfung)
 function playlistReaches(fromId, targetId, seen = new Set()) {
@@ -358,11 +412,7 @@ function playlistReaches(fromId, targetId, seen = new Set()) {
 
 // Datei eines Contents aufräumen, falls nicht mehr referenziert.
 function cleanupContentFile(content) {
-  if (!content) return;
-  if ((content.type === 'image' || content.type === 'video') && content.filename && !fileInUse(content.filename)) {
-    try { unlinkSync(join(UPLOAD_DIR, content.filename)); }
-    catch (err) { console.warn('Datei konnte nicht gelöscht werden:', err.message); }
-  }
+  if (content && (content.type === 'image' || content.type === 'video') && content.filename) cleanupFile(content.filename);
 }
 
 // ---------------------------------------------------------------------------
@@ -409,24 +459,6 @@ app.post('/api/golive', (req, res) => {
   saveLive();
   broadcast();
   res.json({ ok: true });
-});
-
-// Teil-Zustand setzen. Nur noch `welcome` (verschachtelt gemergt); die Playlists
-// werden über die eigenen /api/playlist-Routen verwaltet.
-app.post('/api/state', (req, res) => {
-  const patch = req.body || {};
-  if (patch.welcome && typeof patch.welcome === 'object') {
-    const p = patch.welcome;
-    const prev = state.welcome;
-    const next = { ...prev, ...p };
-    for (const side of ['left', 'right']) {
-      next[side] = { ...prev[side], ...(p[side] && typeof p[side] === 'object' ? p[side] : {}) };
-    }
-    state.welcome = next;
-  }
-  saveState();
-  broadcast();
-  res.json(state);
 });
 
 // ---------------------------------------------------------------------------
@@ -714,86 +746,162 @@ app.post('/api/link/recheck', async (req, res) => {
   }
 });
 
-// --- Willkommens-Overlay: Logo-Upload je Seite ------------------------------
-function logoInUse(filename) {
-  if (!filename) return false;
-  return logoUsedIn(state.welcome, filename) || logoUsedIn(live && live.welcome, filename);
-}
+// ---------------------------------------------------------------------------
+// Overlay-API (mehrere Zeit-Clips über dem Content)
+// ---------------------------------------------------------------------------
+app.post('/api/overlay', (req, res) => {
+  const name = (req.body?.name || '').trim() || `Overlay ${state.overlays.length + 1}`;
+  const o = normalizeOverlay({ name, enabled: true, start: 0, duration: null, elements: [] });
+  state.overlays.push(o);
+  saveState();
+  broadcast();
+  res.json(o);
+});
 
-app.post('/api/welcome/logo', upload.single('file'), (req, res) => {
+// Overlay-Felder ändern: name/enabled/start/duration/blur.
+app.patch('/api/overlay/:id', (req, res) => {
+  const o = getOverlay(req.params.id);
+  if (!o) return res.status(404).json({ error: 'Overlay nicht gefunden' });
+  const p = req.body || {};
+  if (typeof p.name === 'string' && p.name.trim()) o.name = p.name.trim();
+  if (typeof p.enabled === 'boolean') o.enabled = p.enabled;
+  if (typeof p.start === 'number' && p.start >= 0) o.start = p.start;
+  if ('duration' in p) o.duration = (typeof p.duration === 'number' && p.duration > 0) ? p.duration : null;
+  if (typeof p.blur === 'number' && p.blur >= 0) o.blur = p.blur;
+  saveState();
+  broadcast();
+  res.json(o);
+});
+
+app.delete('/api/overlay/:id', (req, res) => {
+  const i = state.overlays.findIndex((o) => o.id === req.params.id);
+  if (i === -1) return res.status(404).json({ error: 'Overlay nicht gefunden' });
+  const [removed] = state.overlays.splice(i, 1);
+  saveState();
+  for (const e of removed.elements) if (e.type === 'image' && e.filename) cleanupFile(e.filename);
+  broadcast();
+  res.json({ ok: true });
+});
+
+// Z-Ordnung der Overlays. Body: { order: [overlayId, ...] }.
+app.post('/api/overlays/order', (req, res) => {
+  const order = req.body?.order;
+  if (!Array.isArray(order)) return res.status(400).json({ error: 'order fehlt' });
+  const byId = new Map(state.overlays.map((o) => [o.id, o]));
+  const re = order.map((id) => byId.get(id)).filter(Boolean);
+  for (const o of state.overlays) if (!order.includes(o.id)) re.push(o);
+  state.overlays = re;
+  saveState();
+  broadcast();
+  res.json({ ok: true });
+});
+
+// Element hinzufügen. Body: { element: {...} } oder direkt die Element-Felder.
+app.post('/api/overlay/:id/element', (req, res) => {
+  const o = getOverlay(req.params.id);
+  if (!o) return res.status(404).json({ error: 'Overlay nicht gefunden' });
+  const el = normalizeElement(req.body?.element || req.body || {});
+  el.id = newId();
+  o.elements.push(el);
+  saveState();
+  broadcast();
+  res.json(el);
+});
+
+// Element ändern (inkl. Position x/y/w/h, Typfelder, source). Typ bleibt erhalten.
+app.patch('/api/overlay/:id/element/:eid', (req, res) => {
+  const o = getOverlay(req.params.id);
+  if (!o) return res.status(404).json({ error: 'Overlay nicht gefunden' });
+  const el = o.elements.find((e) => e.id === req.params.eid);
+  if (!el) return res.status(404).json({ error: 'Element nicht gefunden' });
+  const patch = (req.body?.element && typeof req.body.element === 'object') ? req.body.element : (req.body || {});
+  const oldFile = el.type === 'image' ? el.filename : null;
+  const merged = normalizeElement({ ...el, ...patch, type: el.type, id: el.id });
+  Object.assign(el, merged);
+  saveState();
+  if (oldFile && oldFile !== el.filename) cleanupFile(oldFile);
+  broadcast();
+  res.json(el);
+});
+
+app.delete('/api/overlay/:id/element/:eid', (req, res) => {
+  const o = getOverlay(req.params.id);
+  if (!o) return res.status(404).json({ error: 'Overlay nicht gefunden' });
+  const i = o.elements.findIndex((e) => e.id === req.params.eid);
+  if (i === -1) return res.status(404).json({ error: 'Element nicht gefunden' });
+  const [removed] = o.elements.splice(i, 1);
+  saveState();
+  if (removed.type === 'image' && removed.filename) cleanupFile(removed.filename);
+  broadcast();
+  res.json({ ok: true });
+});
+
+app.post('/api/overlay/:id/elements/order', (req, res) => {
+  const o = getOverlay(req.params.id);
+  if (!o) return res.status(404).json({ error: 'Overlay nicht gefunden' });
+  const order = req.body?.order;
+  if (!Array.isArray(order)) return res.status(400).json({ error: 'order fehlt' });
+  const byId = new Map(o.elements.map((e) => [e.id, e]));
+  const re = order.map((id) => byId.get(id)).filter(Boolean);
+  for (const e of o.elements) if (!order.includes(e.id)) re.push(e);
+  o.elements = re;
+  saveState();
+  broadcast();
+  res.json({ ok: true });
+});
+
+// Bild für ein Image-Element hochladen.
+app.post('/api/overlay/:id/element/:eid/image', upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Keine Datei empfangen' });
-  const side = req.body.side === 'right' ? 'right' : 'left';
-  const old = state.welcome[side].logo;
-  state.welcome[side].logo = req.file.filename;
-  if (old && old !== req.file.filename && !logoInUse(old)) {
-    try { unlinkSync(join(UPLOAD_DIR, old)); } catch (_) {}
+  const o = getOverlay(req.params.id);
+  const el = o && o.elements.find((e) => e.id === req.params.eid);
+  if (!el || el.type !== 'image') {
+    try { unlinkSync(join(UPLOAD_DIR, req.file.filename)); } catch (_) {}
+    return res.status(404).json({ error: 'Bild-Element nicht gefunden' });
   }
+  const old = el.filename;
+  el.filename = req.file.filename;
+  el.url = '';
   saveState();
+  if (old && old !== el.filename) cleanupFile(old);
   broadcast();
-  res.json({ side, logo: req.file.filename });
+  res.json(el);
 });
 
-app.delete('/api/welcome/logo', (req, res) => {
-  const side = req.body?.side === 'right' ? 'right' : 'left';
-  const old = state.welcome[side].logo;
-  state.welcome[side].logo = null;
-  if (old && !logoInUse(old)) {
-    try { unlinkSync(join(UPLOAD_DIR, old)); } catch (_) {}
+// --- QR-Code als SVG (offline via qrcode-Paket) -----------------------------
+app.get('/api/qr', async (req, res) => {
+  const data = (req.query.data || '').toString();
+  if (!data) return res.status(400).send('data fehlt');
+  const dark = (req.query.fg || '#000000').toString();
+  const light = (req.query.bg || '#ffffff').toString();
+  try {
+    const svg = await QRCode.toString(data, { type: 'svg', margin: 1, color: { dark, light } });
+    res.set('Content-Type', 'image/svg+xml');
+    res.set('Cache-Control', 'public, max-age=300');
+    res.send(svg);
+  } catch (_) {
+    res.status(500).send('QR-Fehler');
   }
-  saveState();
-  broadcast();
-  res.json({ ok: true });
 });
 
-// --- Willkommens-Overlay: Presets ------------------------------------------
-app.post('/api/welcome/preset', (req, res) => {
-  const name = (req.body?.name || '').trim() || `Preset ${state.welcome.presets.length + 1}`;
-  const preset = { id: newId(), name, config: welcomeConfigSnapshot(state.welcome) };
-  state.welcome.presets.push(preset);
-  saveState();
-  broadcast();
-  res.json(preset);
-});
-
-app.post('/api/welcome/preset/:id/apply', (req, res) => {
-  const preset = state.welcome.presets.find((p) => p.id === req.params.id);
-  if (!preset) return res.status(404).json({ error: 'Preset nicht gefunden' });
-  const c = preset.config || {};
-  const w = state.welcome;
-  if (typeof c.template === 'string') w.template = c.template;
-  if (typeof c.fontSize === 'number') w.fontSize = c.fontSize;
-  if (typeof c.blur === 'number') w.blur = c.blur;
-  if (typeof c.headline === 'string') w.headline = c.headline;
-  if (c.left) w.left = { ...c.left };
-  if (c.right) w.right = { ...c.right };
-  saveState();
-  broadcast();
-  res.json(w);
-});
-
-app.post('/api/welcome/preset/:id/save', (req, res) => {
-  const preset = state.welcome.presets.find((p) => p.id === req.params.id);
-  if (!preset) return res.status(404).json({ error: 'Preset nicht gefunden' });
-  const oldLogos = [preset.config?.left?.logo, preset.config?.right?.logo];
-  preset.config = welcomeConfigSnapshot(state.welcome);
-  for (const fn of oldLogos) {
-    if (fn && !logoInUse(fn)) { try { unlinkSync(join(UPLOAD_DIR, fn)); } catch (_) {} }
+// --- Externer Abruf-Proxy (für dynamische Elemente; umgeht CORS) ------------
+// Phase-1-Grundgerüst für Wetter/Newsfeeds. Vollständige API folgt in Phase 2.
+app.get('/api/fetch', async (req, res) => {
+  const url = (req.query.url || '').toString();
+  if (!/^https?:\/\//i.test(url)) return res.status(400).json({ error: 'Ungültige URL' });
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 7000);
+    const r = await fetch(url, { redirect: 'follow', signal: ctrl.signal, headers: { 'User-Agent': 'Screenwall' } });
+    clearTimeout(timer);
+    const ct = (r.headers.get('content-type') || 'text/plain').toLowerCase();
+    const body = await r.text();
+    res.set('Content-Type', ct.includes('json') ? 'application/json; charset=utf-8' : 'text/plain; charset=utf-8');
+    res.set('Cache-Control', 'no-cache');
+    res.send(body);
+  } catch (_) {
+    res.status(502).json({ error: 'Abruf fehlgeschlagen' });
   }
-  saveState();
-  broadcast();
-  res.json(preset);
-});
-
-app.delete('/api/welcome/preset/:id', (req, res) => {
-  const idx = state.welcome.presets.findIndex((p) => p.id === req.params.id);
-  if (idx === -1) return res.status(404).json({ error: 'Preset nicht gefunden' });
-  const [removed] = state.welcome.presets.splice(idx, 1);
-  for (const fn of [removed.config?.left?.logo, removed.config?.right?.logo]) {
-    if (fn && !logoInUse(fn)) { try { unlinkSync(join(UPLOAD_DIR, fn)); } catch (_) {} }
-  }
-  saveState();
-  broadcast();
-  res.json({ ok: true });
 });
 
 // ---------------------------------------------------------------------------

@@ -115,14 +115,22 @@
 }
 .tl-block.live-now { border-color: #e51f25; box-shadow: 0 0 0 1px #e51f25, 0 0 12px rgba(229,31,37,0.5); }
 
-/* Overlay-Block (über die ganze Programmlänge) */
-.tl-overlay-block {
-  position: absolute; top: 10px; bottom: 10px; left: 0;
-  border-radius: 7px; background: rgba(246,196,83,0.16);
-  border: 1px solid rgba(246,196,83,0.5);
-  display: flex; align-items: center; padding: 0 12px;
-  color: #f6c453; font-size: 12px; font-weight: 600; letter-spacing: 0.02em;
+/* Overlay-Clips (eine Lane pro Overlay) */
+.tl-ov-clip {
+  position: absolute; top: 8px; bottom: 8px; left: 0;
+  border-radius: 7px; background: rgba(246,196,83,0.18);
+  border: 1px solid rgba(246,196,83,0.6);
+  display: flex; align-items: center; gap: 6px; padding: 0 8px;
+  color: #f6c453; font-size: 12px; font-weight: 600; cursor: grab; overflow: hidden;
 }
+.tl-ov-clip.disabled { opacity: 0.45; }
+.tl-ov-clip:active { cursor: grabbing; }
+.tl-ov-label { flex: 1 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+.tl-ov-eye { background: transparent; border: 0; color: inherit; cursor: pointer; font-size: 13px; padding: 0 2px; flex: 0 0 auto; }
+.tl-ov-handle { position: absolute; top: 0; bottom: 0; width: 9px; cursor: ew-resize; z-index: 2; }
+.tl-ov-handle.l { left: 0; border-top-left-radius: 7px; border-bottom-left-radius: 7px; }
+.tl-ov-handle.r { right: 0; border-top-right-radius: 7px; border-bottom-right-radius: 7px; }
+.tl-ov-handle:hover { background: rgba(246,196,83,0.55); }
 
 /* Playhead */
 .tl-playhead {

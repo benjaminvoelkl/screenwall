@@ -51,6 +51,7 @@
           <span class="tl-zoom-end">Alles</span>
           <button id="tl-fit" class="tl-tbtn" title="Komplette Timeline anzeigen">⤢ Alles</button>
         </span>
+        <button id="tl-add-overlay" class="tl-tbtn" title="Neues Overlay anlegen">✦ + Overlay</button>
         <span class="hint" style="margin:0">Spur anklicken/ziehen = scrubben.</span>
       </div>
 
@@ -59,14 +60,14 @@
           <div class="tl-gutter-ruler"></div>
           <div class="tl-gutter-label"><span class="ic">🎬</span> Content</div>
           <div class="tl-gutter-label"><span class="ic">🎵</span> Musik</div>
-          <div class="tl-gutter-label"><span class="ic">✦</span> Overlay</div>
+          <div id="ov-gutter"></div>
         </div>
         <div class="tl-scroll" id="tl-scroll">
           <div class="tl-tracks" id="tl-tracks">
             <div class="tl-ruler" id="tl-ruler"></div>
             <div class="tl-lane" id="lane-content"></div>
             <div class="tl-lane empty" id="lane-music">Musik – folgt</div>
-            <div class="tl-lane" id="lane-overlay"></div>
+            <div id="ov-lanes"></div>
             <div class="tl-playhead" id="tl-playhead"></div>
           </div>
         </div>
