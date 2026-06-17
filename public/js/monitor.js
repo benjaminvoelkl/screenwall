@@ -14,8 +14,8 @@
     const stage = $('monitor-stage');
     const wrap = $('monitor-frame-wrap');
     const availW = window.innerWidth * 0.94;
-    // Platz für On-Air-Balken (oben) und Lautstärkeleiste (unten) lassen.
-    const availH = window.innerHeight - 150;
+    // Platz für Menü + On-Air-Streifen (oben) und Lautstärkeleiste (unten) lassen.
+    const availH = window.innerHeight - 185;
     const s = Math.max(0.01, Math.min(availW / PREVIEW_W, availH / PREVIEW_H));
     stage.style.width = Math.round(PREVIEW_W * s) + 'px';
     stage.style.height = Math.round(PREVIEW_H * s) + 'px';

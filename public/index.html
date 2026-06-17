@@ -7,18 +7,20 @@
   <link rel="stylesheet" href="/css/monitor.css" />
 </head>
 <body>
-  <!-- Voller On-Air-Balken über die gesamte Seitenbreite -->
+  <!-- Menü wie auf /settings: Marke (→ Home) links, Einstellungen rechts -->
+  <header class="topbar">
+    <a class="brand" href="/">Screenwall</a>
+    <a class="settings-link" href="/settings">⚙ Einstellungen</a>
+  </header>
+
+  <!-- Dezenter, schmaler roter Live-Streifen -->
   <div class="onair-bar" id="onair-bar">
-    <span class="onair-left">
-      <span class="onair-dot"></span>
-      <span class="onair-label">ON AIR</span>
-    </span>
-    <span class="onair-center" id="onair-mode">–</span>
-    <span class="onair-right">
-      <span class="conn" title="Verbindung zum Server">
-        <span id="conn-dot" class="dot"></span>
-      </span>
-      <a class="settings-btn" href="/settings">⚙ Einstellungen</a>
+    <span class="onair-dot"></span>
+    <span class="onair-label">On Air</span>
+    <span class="onair-sep">·</span>
+    <span class="onair-mode" id="onair-mode">–</span>
+    <span class="conn" title="Verbindung zum Server">
+      <span id="conn-dot" class="dot"></span>
     </span>
   </div>
 
