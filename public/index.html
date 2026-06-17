@@ -62,14 +62,60 @@
 
       <ul id="ss-list" class="media-list"></ul>
       <p class="hint">Reihenfolge per Drag &amp; Drop ändern. Klick auf 🗑 löscht ein Medium.</p>
+    </section>
 
-      <!-- Willkommens-Overlay: wird über die laufende Diashow gelegt
-           (Dual-TV-Begrüßungsscreen: links begrüßende, rechts begrüßte Firma). -->
-      <div class="wc-section">
-        <h3>Willkommens-Overlay</h3>
+    <!-- ===== Modus 2: YouTube ===== -->
+    <section class="panel" id="panel-youtube">
+      <h2>YouTube-Playlist</h2>
+      <div class="row">
+        <label class="grow">YouTube-Link oder Video-ID hinzufügen
+          <input type="text" id="yt-input" placeholder="https://youtu.be/… oder Video-ID" />
+        </label>
+        <button id="yt-add" class="btn">Hinzufügen</button>
+      </div>
+      <label class="checkbox">
+        <input type="checkbox" id="yt-muted" />
+        Stumm abspielen (für zuverlässigen Autoplay empfohlen)
+      </label>
+      <label class="checkbox">
+        <input type="checkbox" id="yt-crop" />
+        Video formatfüllend zuschneiden (Bildschirm füllen statt schwarzer Balken)
+      </label>
+      <ul id="yt-list" class="media-list"></ul>
+      <p class="hint">Reihenfolge per Drag &amp; Drop ändern.</p>
+    </section>
+
+    <!-- ===== Modus 3: Link ===== -->
+    <section class="panel" id="panel-link">
+      <h2>Link</h2>
+      <div class="row">
+        <label class="grow">Webseiten-Link hinzufügen
+          <input type="text" id="link-input" placeholder="https://… oder example.com" />
+        </label>
+        <button id="link-add" class="btn">Hinzufügen</button>
+      </div>
+      <div class="row">
+        <label>Anzeigedauer pro Link (Sekunden)
+          <input type="number" id="link-duration" min="3" max="600" step="1" />
+        </label>
+      </div>
+      <ul id="link-list" class="media-list"></ul>
+      <p class="hint">Bei mehreren Links wird im Vollbild rotiert; ein einzelner bleibt stehen.
+        Reihenfolge per Drag &amp; Drop ändern, 🗑 löscht. Hinweis: Manche Seiten
+        (z.&nbsp;B. Google, YouTube-Startseite) verbieten die Einbettung und bleiben dann leer.</p>
+    </section>
+
+    <!-- ===== Willkommens-Overlay: unabhängig von allen Modi ===========
+         Liegt auf der Wand ÜBER dem aktiven Inhalt (Diashow, YouTube oder
+         Webseite) – Dual-TV-Begrüßungsscreen: links begrüßende, rechts
+         begrüßte Firma. Daher eigene, immer sichtbare Sektion. -->
+    <section class="wc-section">
+      <h2>Willkommens-Overlay</h2>
+      <p class="hint">Wird über dem aktuell laufenden Modus (Diashow, YouTube oder Webseite) eingeblendet.</p>
+      <div class="wc-section-inner">
         <label class="checkbox">
           <input type="checkbox" id="wc-visible" />
-          Overlay über der Diashow einblenden
+          Overlay einblenden (über jedem Modus)
         </label>
 
         <div class="row">
@@ -170,47 +216,6 @@
           </div>
         </div>
       </div>
-    </section>
-
-    <!-- ===== Modus 2: YouTube ===== -->
-    <section class="panel" id="panel-youtube">
-      <h2>YouTube-Playlist</h2>
-      <div class="row">
-        <label class="grow">YouTube-Link oder Video-ID hinzufügen
-          <input type="text" id="yt-input" placeholder="https://youtu.be/… oder Video-ID" />
-        </label>
-        <button id="yt-add" class="btn">Hinzufügen</button>
-      </div>
-      <label class="checkbox">
-        <input type="checkbox" id="yt-muted" />
-        Stumm abspielen (für zuverlässigen Autoplay empfohlen)
-      </label>
-      <label class="checkbox">
-        <input type="checkbox" id="yt-crop" />
-        Video formatfüllend zuschneiden (Bildschirm füllen statt schwarzer Balken)
-      </label>
-      <ul id="yt-list" class="media-list"></ul>
-      <p class="hint">Reihenfolge per Drag &amp; Drop ändern.</p>
-    </section>
-
-    <!-- ===== Modus 3: Link ===== -->
-    <section class="panel" id="panel-link">
-      <h2>Link</h2>
-      <div class="row">
-        <label class="grow">Webseiten-Link hinzufügen
-          <input type="text" id="link-input" placeholder="https://… oder example.com" />
-        </label>
-        <button id="link-add" class="btn">Hinzufügen</button>
-      </div>
-      <div class="row">
-        <label>Anzeigedauer pro Link (Sekunden)
-          <input type="number" id="link-duration" min="3" max="600" step="1" />
-        </label>
-      </div>
-      <ul id="link-list" class="media-list"></ul>
-      <p class="hint">Bei mehreren Links wird im Vollbild rotiert; ein einzelner bleibt stehen.
-        Reihenfolge per Drag &amp; Drop ändern, 🗑 löscht. Hinweis: Manche Seiten
-        (z.&nbsp;B. Google, YouTube-Startseite) verbieten die Einbettung und bleiben dann leer.</p>
     </section>
   </main>
 

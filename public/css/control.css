@@ -183,12 +183,16 @@ textarea { resize: vertical; }
 .link-bad { color: var(--danger); }
 .link-unknown { color: var(--muted); }
 
-/* Willkommens-Overlay-Bereich innerhalb des Diashow-Panels */
+/* Willkommens-Overlay: eigenständige, immer sichtbare Sektion (über jedem Modus) */
 .wc-section {
-  margin-top: 20px;
-  padding-top: 18px;
-  border-top: 1px solid var(--border);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 18px;
 }
+.wc-section h2 { margin: 0 0 4px; font-size: 18px; }
+.wc-section-inner { margin-top: 14px; }
 .wc-section h3 { margin: 0 0 14px; font-size: 16px; }
 .wc-section h4 { margin: 0 0 10px; font-size: 14px; color: var(--muted); }
 .wc-side-edit {

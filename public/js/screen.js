@@ -78,8 +78,9 @@
     toggle(els.youtube, mode === 'youtube');
     toggle(els.link, mode === 'link');
 
-    // Willkommens-Overlay liegt über der Diashow und ist nur dort sichtbar.
-    renderWelcome(state.welcome, mode === 'slideshow');
+    // Willkommens-Overlay liegt über jedem Modus (Diashow, YouTube, Link)
+    // und wird allein über `visible` ein-/ausgeschaltet.
+    renderWelcome(state.welcome);
 
     if (mode === 'slideshow') Slideshow.update(state.slideshow, prev?.slideshow, prev?.mode !== 'slideshow');
     else Slideshow.stop();
@@ -94,11 +95,11 @@
 
   function toggle(el, on) { el.classList.toggle('hidden', !on); }
 
-  // ---- Willkommens-Overlay (über der Diashow) -----------------------------
-  function renderWelcome(w, slideshowActive) {
+  // ---- Willkommens-Overlay (über jedem Modus) -----------------------------
+  function renderWelcome(w) {
     w = w || {};
-    // Nur über der Diashow und nur wenn eingeschaltet einblenden.
-    const on = slideshowActive && w.visible !== false;
+    // Unabhängig vom Modus; nur über `visible` gesteuert.
+    const on = w.visible !== false;
     toggle(els.welcome, on);
     if (!on) return;
 

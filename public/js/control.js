@@ -445,7 +445,7 @@
     });
   }
 
-  // ===== Willkommens-Overlay (Teil der Diashow) ==========================
+  // ===== Willkommens-Overlay (eigenständig, über jedem Modus) ============
   $('wc-visible').addEventListener('change', (e) =>
     postState({ welcome: { visible: e.target.checked } }));
   // Vorlage-Dropdown enthält Stile (style:…) und eigene Vorlagen (preset:…).
