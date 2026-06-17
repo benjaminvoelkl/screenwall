@@ -18,6 +18,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join, extname } from 'path';
 import { randomUUID } from 'crypto';
 import { networkInterfaces } from 'os';
+import { execFile } from 'child_process';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
@@ -27,6 +28,11 @@ const HOST = '0.0.0.0';
 const STATE_FILE = join(__dirname, 'state.json');
 const UPLOAD_DIR = join(__dirname, 'uploads');
 const PUBLIC_DIR = join(__dirname, 'public');
+
+// Audio-Ziel für die Lautstärkesteuerung (PipeWire/WirePlumber via wpctl).
+// Standard: der Default-Sink (robust über Reboots). Per Env überschreibbar,
+// z. B. AUDIO_SINK=35 für ein festes Gerät.
+const AUDIO_SINK = process.env.AUDIO_SINK || '@DEFAULT_AUDIO_SINK@';
 
 if (!existsSync(UPLOAD_DIR)) mkdirSync(UPLOAD_DIR, { recursive: true });
 
@@ -234,6 +240,49 @@ app.post('/api/state', (req, res) => {
   saveState();
   broadcast();
   res.json(state);
+});
+
+// --- Systemlautstärke (wpctl) ----------------------------------------------
+// Läuft auf dem Wand-Rechner (Kiosk) und steuert die Ausgabe-Lautstärke der
+// /screen-Wiedergabe (v. a. YouTube-Ton). Setzt voraus, dass der Server als
+// derselbe Benutzer mit Zugriff auf die PipeWire-Session läuft.
+function wpctl(args) {
+  return new Promise((resolve, reject) => {
+    execFile('wpctl', args, { timeout: 4000 }, (err, stdout, stderr) => {
+      if (err) reject(new Error((stderr || err.message || '').trim()));
+      else resolve(stdout);
+    });
+  });
+}
+async function readVolume() {
+  const out = await wpctl(['get-volume', AUDIO_SINK]);
+  const m = out.match(/Volume:\s*([\d.]+)/);
+  return { level: m ? parseFloat(m[1]) : null, muted: /\[MUTED\]/i.test(out) };
+}
+
+// Aktuelle Lautstärke lesen (beim Laden der Steuerseite).
+app.get('/api/volume', async (req, res) => {
+  try { res.json(await readVolume()); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Lautstärke setzen ({ level: 0..1 }) und/oder Stummschaltung
+// ({ mute: 'toggle' | true | false }).
+app.post('/api/volume', async (req, res) => {
+  const body = req.body || {};
+  try {
+    if (typeof body.level === 'number') {
+      const level = Math.min(1, Math.max(0, body.level));
+      await wpctl(['set-volume', AUDIO_SINK, level.toFixed(2)]);
+    }
+    if (body.mute !== undefined) {
+      const arg = body.mute === 'toggle' ? 'toggle' : (body.mute ? '1' : '0');
+      await wpctl(['set-mute', AUDIO_SINK, arg]);
+    }
+    res.json(await readVolume());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // --- Upload (Modus 1) -------------------------------------------------------

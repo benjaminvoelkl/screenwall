@@ -58,12 +58,20 @@ html, body {
 }
 @media (prefers-reduced-motion: reduce) { .onair-dot { animation: none; } }
 
-/* Footer: Verbindungsstatus + /screen-Link */
+/* Footer: Verbindungsstatus + Lautstärke + /screen-Link */
 .footer {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
   max-width: 880px; margin: 8px auto 0; padding: 16px 20px;
   border-top: 1px solid var(--border); color: var(--muted); font-size: 14px;
 }
+.vol { display: flex; align-items: center; gap: 8px; }
+.vol-icon {
+  background: none; border: 0; color: var(--text); font-size: 17px;
+  cursor: pointer; padding: 2px; line-height: 1;
+}
+#vol-range { width: 120px; accent-color: var(--accent); cursor: pointer; }
+#vol-range:disabled { opacity: 0.4; cursor: default; }
+.vol-val { min-width: 40px; text-align: right; font-variant-numeric: tabular-nums; }
 
 .modes {
   display: flex;

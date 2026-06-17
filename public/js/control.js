@@ -209,6 +209,46 @@
   });
   seekBar.addEventListener('change', () => { sendSeek(Number(seekBar.value)); seeking = false; });
 
+  // ---- Systemlautstärke (wpctl auf dem Wand-Rechner) ----------------------
+  const volRange = $('vol-range'), volVal = $('vol-val'), volMute = $('vol-mute');
+  let lastVolSent = 0;
+
+  function renderVol(d) {
+    if (d && typeof d.level === 'number') {
+      const pct = Math.round(d.level * 100);
+      if (document.activeElement !== volRange) volRange.value = pct;
+      volVal.textContent = pct + '%';
+    } else {
+      volVal.textContent = '–';
+    }
+    if (d && d.muted !== undefined) volMute.textContent = d.muted ? '🔇' : '🔊';
+  }
+  async function loadVol() {
+    try {
+      const r = await fetch('/api/volume');
+      if (!r.ok) throw new Error();
+      renderVol(await r.json());
+    } catch (_) { volVal.textContent = '–'; volRange.disabled = true; }
+  }
+  async function postVol(payload) {
+    try {
+      const r = await fetch('/api/volume', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (r.ok) renderVol(await r.json());
+    } catch (_) {}
+  }
+  volRange.addEventListener('input', () => {
+    const pct = Number(volRange.value);
+    volVal.textContent = pct + '%';
+    const now = Date.now();
+    if (now - lastVolSent > 120) { postVol({ level: pct / 100 }); lastVolSent = now; }
+  });
+  volRange.addEventListener('change', () => postVol({ level: Number(volRange.value) / 100 }));
+  volMute.addEventListener('click', () => postVol({ mute: 'toggle' }));
+  loadVol();
+
   async function deleteMedia(id) {
     await fetch(`/api/media/${id}`, { method: 'DELETE' });
   }
