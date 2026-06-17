@@ -57,6 +57,8 @@
         if (msg.type === 'state') applyState(msg.state);
         else if (msg.type === 'cmd' && msg.cmd === 'seek') seekCurrent(msg.time);
         else if (msg.type === 'cmd' && msg.cmd === 'goto') gotoEntry(msg.itemId, msg.time);
+        else if (msg.type === 'cmd' && msg.cmd === 'pause') previewPause();
+        else if (msg.type === 'cmd' && msg.cmd === 'play') previewPlay();
         else if (msg.type === 'cmd' && msg.cmd === 'nowplaying') { if (viewer === 'monitor') applyNowPlaying(msg); }
         else if (msg.type === 'cmd' && msg.cmd === 'sync-request') { if (viewer === 'wall') sendNowPlaying(); }
       } catch (_) { /* ignorieren */ }
@@ -156,12 +158,13 @@
       } catch (_) {}
     }
     function pause() { try { if (player && player.pauseVideo) player.pauseVideo(); } catch (_) {} }
+    function resume() { try { if (ready && player && player.playVideo) player.playVideo(); } catch (_) {} }
     function seek(t) { try { if (ready && player && player.seekTo) { player.seekTo(t, true); player.playVideo(); } } catch (_) {} }
     function getPos() {
       try { if (ready && player && player.getDuration) { const d = player.getDuration(); if (d > 0) return { time: player.getCurrentTime(), duration: d }; } } catch (_) {}
       return null;
     }
-    return { play, pause, seek, getPos };
+    return { play, pause, resume, seek, getPos };
   })();
 
   // ===== Playlist-Scheduler ===============================================
@@ -171,6 +174,17 @@
   let current = null;    // { itemId, type, contentJSON, videoEl }
   let activeSlot = 0;    // welcher der beiden Crossfade-Slots gerade sichtbar ist
   let advanceTimer = null, cleanupTimer = null, monFallback = null;
+
+  // Vorschau-Uhr (nur viewer 'preview'): misst die verstrichene Zeit im aktuellen
+  // Content – auch für statische Inhalte (Farbe/Bild) – und ist pausierbar. Damit
+  // kann die Programm-Timeline (/programm) den Playhead der Wiedergabe folgen lassen
+  // und per cmd play/pause steuern.
+  let previewPaused = false;
+  let pvBaseMs = 0, pvStartTs = null;
+  function pvElapsed() { return (pvBaseMs + (pvStartTs != null ? performance.now() - pvStartTs : 0)) / 1000; }
+  function pvReset(off, running) { pvBaseMs = Math.max(0, (off || 0) * 1000); pvStartTs = running ? performance.now() : null; }
+  function pvPause() { if (pvStartTs != null) { pvBaseMs += performance.now() - pvStartTs; pvStartTs = null; } }
+  function pvResume() { if (pvStartTs == null) pvStartTs = performance.now(); }
 
   // Top-Playlist rekursiv ausflachen; verschachtelte Playlists inline einfügen.
   function flatten(plId, byId, visited) {
@@ -249,10 +263,10 @@
         videoId: c.videoId, muted: c.muted !== false,
         startSeconds: opts.startSeconds || 0,
         force: viewer !== 'monitor', // Wand/Vorschau starten neu; Monitor steigt ein
-        onEnded: (autoAdvance && c.videoMode !== 'duration') ? advance : null
+        onEnded: (autoAdvance && !isPreview && c.videoMode !== 'duration') ? advance : null
       });
       activate(els.ytLayer);
-      current = { itemId: entry.itemId, type: 'youtube', contentJSON: JSON.stringify(c), videoEl: null };
+      current = { itemId: entry.itemId, type: 'youtube', content: c, contentJSON: JSON.stringify(c), videoEl: null };
     } else {
       const slot = slots[1 - activeSlot];
       slot.innerHTML = '';
@@ -262,11 +276,31 @@
       if (v) { try { v.currentTime = opts.startSeconds || 0; } catch (_) {} v.play().catch(() => {}); }
       activate(slot);
       activeSlot = 1 - activeSlot;
-      current = { itemId: entry.itemId, type: c.type, contentJSON: JSON.stringify(c), videoEl: v || null };
+      current = { itemId: entry.itemId, type: c.type, content: c, contentJSON: JSON.stringify(c), videoEl: v || null };
     }
 
-    if (autoAdvance) scheduleAdvance(entry);
+    // Vorschau: eigene pausierbare Uhr + Weiterschalten per Tick (siehe previewTick).
+    // Wand: klassisches scheduleAdvance per Timer.
+    if (isPreview) {
+      pvReset(opts.startSeconds || 0, !previewPaused);
+      if (previewPaused) pauseCurrentMedia();
+    } else if (autoAdvance) {
+      scheduleAdvance(entry);
+    }
   }
+
+  function pauseCurrentMedia() {
+    if (!current) return;
+    if (current.type === 'youtube') YT.pause();
+    else if (current.videoEl) { try { current.videoEl.pause(); } catch (_) {} }
+  }
+  function playCurrentMedia() {
+    if (!current) return;
+    if (current.type === 'youtube') YT.resume();
+    else if (current.videoEl) current.videoEl.play().catch(() => {});
+  }
+  function previewPause() { if (!isPreview) return; previewPaused = true; pvPause(); pauseCurrentMedia(); }
+  function previewPlay() { if (!isPreview) return; previewPaused = false; pvResume(); playCurrentMedia(); }
 
   // Sichtbare Schicht setzen; nicht sichtbare Slots nach dem Fade entladen
   // (stoppt Video/Audio in iframes).
@@ -408,16 +442,35 @@
     }
   }
 
-  if (viewer === 'preview') {
-    setInterval(() => {
-      let pos = null; const mode = current ? current.type : null;
-      if (current && current.type === 'youtube') pos = YT.getPos();
-      else if (current && current.type === 'video' && current.videoEl) {
+  // Vorschau-Tick: meldet Position (inkl. itemId + verstrichene Zeit auch für
+  // statische Inhalte) an /programm und schaltet selbst weiter (pausierbar).
+  function previewTick() {
+    const c = current && current.content;
+    let pos = null, effEnd = null;
+    if (current) {
+      if (current.type === 'youtube') {
+        const p = YT.getPos();
+        if (p) { pos = p; effEnd = c.videoMode !== 'duration' ? p.duration : (c.durationSec || 6); }
+        else { pos = { time: pvElapsed(), duration: c.durationSec || 6 }; }
+      } else if (current.type === 'video' && current.videoEl && isFinite(current.videoEl.duration) && current.videoEl.duration > 0) {
         const v = current.videoEl;
-        if (isFinite(v.duration) && v.duration > 0) pos = { time: v.currentTime, duration: v.duration };
+        pos = { time: v.currentTime, duration: v.duration };
+        effEnd = c.videoMode !== 'duration' ? v.duration : (c.durationSec || 6);
+      } else {
+        // Statischer Content (Farbe/Bild/Webseite) bzw. Video vor Metadaten.
+        pos = { time: pvElapsed(), duration: (c && c.durationSec) || 6 };
+        effEnd = (c && c.durationSec) || 6;
       }
-      window.parent.postMessage({ type: 'screen-pos', mode, pos }, '*');
-    }, 250);
+    }
+    window.parent.postMessage({
+      type: 'screen-pos', mode: current ? current.type : null,
+      itemId: current ? current.itemId : null, paused: previewPaused, pos
+    }, '*');
+    if (!previewPaused && effEnd && pos && pos.time >= effEnd - 0.2) advance();
+  }
+
+  if (viewer === 'preview') {
+    setInterval(previewTick, 200);
     requestSync(); setInterval(requestSync, 2000);
   } else if (viewer === 'monitor') {
     requestSync(); setInterval(requestSync, 2000);

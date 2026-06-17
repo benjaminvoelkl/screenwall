@@ -54,17 +54,23 @@
   // ---- Entwurf-Vorschau laden (Sicht 'preview' in screen.js) --------------
   $('prev-frame').src = '/screen';
 
-  // Vorschau meldet ihre Position; daraus die echte Dauer von "bis Ende"-Videos
-  // lernen und den aktuell gescrubbten Block nachskalieren.
-  let lastGotoItemId = null;
+  // Vorschau meldet laufend ihre Position (itemId + Zeit, auch für statische
+  // Inhalte). Damit folgt der Playhead der Wiedergabe und die echte Dauer von
+  // "bis Ende"-Videos wird übernommen (Block nachskalieren).
+  let scrubbing = false;
   window.addEventListener('message', (e) => {
     const d = e.data;
-    if (!d || d.type !== 'screen-pos' || !d.pos || !lastGotoItemId) return;
-    const dur = d.pos.duration;
-    if (dur && dur > 0 && Math.abs((measured[lastGotoItemId] || 0) - dur) > 0.5) {
-      measured[lastGotoItemId] = dur;
-      render();
+    if (!d || d.type !== 'screen-pos' || !d.itemId) return;
+    const t = d.pos ? d.pos.time || 0 : 0;
+    const dur = d.pos ? d.pos.duration || 0 : 0;
+    const b = blocks.find((x) => x.itemId === d.itemId);
+    if (!b) return;
+    const c = b.content;
+    if (dur > 0 && (c.type === 'video' || c.type === 'youtube') && c.videoMode !== 'duration'
+        && Math.abs((measured[d.itemId] || 0) - dur) > 0.5) {
+      measured[d.itemId] = dur; render(); return;
     }
+    if (!scrubbing) { playheadT = Math.min(total, b.start + t); positionPlayhead(); }
   });
 
   // ===== Ausflachen (Quelle: screen.js:flatten – bewusst gespiegelt) ========
@@ -191,8 +197,16 @@
   }
 
   function positionPlayhead() {
-    $('tl-playhead').style.left = (playheadT * pxPerSec) + 'px';
+    const px = playheadT * pxPerSec;
+    $('tl-playhead').style.left = px + 'px';
     $('prog-clock').textContent = `${fmtClock(playheadT)} / ${fmtClock(total)}`;
+    // Playhead bei laufender Wiedergabe im Sichtbereich halten.
+    if (playing && !scrubbing) {
+      const sc = $('tl-scroll');
+      if (px < sc.scrollLeft + 30 || px > sc.scrollLeft + sc.clientWidth - 30) {
+        sc.scrollLeft = Math.max(0, px - sc.clientWidth / 2);
+      }
+    }
   }
 
   function applyLiveNow() {
@@ -211,31 +225,28 @@
   }
 
   let lastSent = 0;
+  function sendGoto(T) {
+    const e = entryAt(T);
+    if (e) wsSend({ type: 'cmd', cmd: 'goto', itemId: e.itemId, time: e.offset });
+  }
   function scrubTo(T, opts) {
     opts = opts || {};
     playheadT = Math.max(0, Math.min(total, T));
     positionPlayhead();
+    positioned = true; updateGoLive();   // Positionswechsel blendet "Preview & Go Live" ein
     const now = Date.now();
-    if (!opts.throttle || now - lastSent > 80) {
-      const e = entryAt(playheadT);
-      if (e) { lastGotoItemId = e.itemId; wsSend({ type: 'cmd', cmd: 'goto', itemId: e.itemId, time: e.offset }); }
-      lastSent = now;
-    }
+    if (!opts.throttle || now - lastSent > 80) { sendGoto(playheadT); lastSent = now; }
   }
 
   (function bindScrub() {
     const tracks = $('tl-tracks');
-    let dragging = false;
-    const timeAt = (clientX) => {
-      const rect = tracks.getBoundingClientRect();
-      return (clientX - rect.left) / pxPerSec;
-    };
+    const timeAt = (clientX) => (clientX - tracks.getBoundingClientRect().left) / pxPerSec;
     tracks.addEventListener('pointerdown', (e) => {
-      dragging = true; tracks.setPointerCapture(e.pointerId);
+      scrubbing = true; tracks.setPointerCapture(e.pointerId);
       scrubTo(timeAt(e.clientX));
     });
-    tracks.addEventListener('pointermove', (e) => { if (dragging) scrubTo(timeAt(e.clientX), { throttle: true }); });
-    const end = () => { dragging = false; };
+    tracks.addEventListener('pointermove', (e) => { if (scrubbing) scrubTo(timeAt(e.clientX), { throttle: true }); });
+    const end = () => { if (!scrubbing) return; scrubbing = false; sendGoto(playheadT); };
     tracks.addEventListener('pointerup', end);
     tracks.addEventListener('pointercancel', end);
   })();
@@ -262,12 +273,35 @@
   }
   requestAnimationFrame(scaleInlinePreview);
 
+  // ===== Wiedergabe (Play/Pause) ===========================================
+  let playing = true; // Vorschau startet selbstständig
+  function setPlaying(p) {
+    playing = p;
+    $('tl-play').textContent = p ? '⏸' : '▶';
+    $('tl-play').title = p ? 'Pause (Leertaste)' : 'Abspielen (Leertaste)';
+    wsSend({ type: 'cmd', cmd: p ? 'play' : 'pause' });
+  }
+  function togglePlay() { setPlaying(!playing); }
+  $('tl-play').addEventListener('click', togglePlay);
+  $('tl-to-start').addEventListener('click', () => scrubTo(0));
+  document.addEventListener('keydown', (e) => {
+    if (e.code !== 'Space') return;
+    const t = e.target;
+    if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
+    if (!$('golive-modal').classList.contains('hidden')) return;
+    e.preventDefault();
+    togglePlay();
+  });
+
   // ===== Go Live ===========================================================
-  function setDirty(dirty) {
+  let dirtyState = false, positioned = false;
+  function setDirty(dirty) { dirtyState = dirty; updateGoLive(); }
+  function updateGoLive() {
     const live = $('go-live');
-    live.classList.toggle('hidden', !dirty);
-    live.classList.toggle('pending', dirty);
-    live.textContent = '● Preview & Go Live';
+    const show = dirtyState || positioned;
+    live.classList.toggle('hidden', !show);
+    live.classList.toggle('pending', dirtyState);
+    live.textContent = dirtyState ? '● Preview & Go Live' : 'Preview & Go Live';
   }
   $('go-live').addEventListener('click', openGoLive);
 
@@ -279,7 +313,7 @@
     requestAnimationFrame(scaleGolivePreview);
     // Vorschau ab Playhead-Punkt starten, sobald das Iframe verbunden ist.
     const e = entryAt(playheadT);
-    if (e) setTimeout(() => { lastGotoItemId = e.itemId; wsSend({ type: 'cmd', cmd: 'goto', itemId: e.itemId, time: e.offset }); }, 1200);
+    if (e) setTimeout(() => wsSend({ type: 'cmd', cmd: 'goto', itemId: e.itemId, time: e.offset }), 1200);
   }
   function closeGoLive() {
     $('golive-modal').classList.add('hidden');
