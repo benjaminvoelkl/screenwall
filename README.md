@@ -3,20 +3,31 @@
 Lokale Web-Anwendung zur Steuerung eines Anzeige-Bildschirms (Beamer/Monitor) von
 einem beliebigen Gerät im selben Netzwerk (Tablet, Handy, Laptop).
 
-- **`/`** – Steuerseite: Modus wählen und Inhalte konfigurieren.
-- **`/screen`** – Vollbild-Anzeige: zeigt sofort, was auf `/` eingestellt wurde.
+- **`/`** – Live-Monitor: spiegelt maßstabsgetreu, was gerade auf der Wand läuft.
+- **`/settings`** – Programmplanung: Playlists und Inhalte konfigurieren.
+- **`/screen`** – Vollbild-Anzeige (Beamer/Wand): zeigt die veröffentlichte Übertragung.
+- **`/overlay`** – Willkommens-Overlay konfigurieren (liegt über dem Hintergrund).
 
-Änderungen auf `/` erscheinen **ohne Neuladen** auf `/screen` (Live-Update via WebSocket).
+Änderungen auf `/settings` landen zunächst im **Entwurf** und erscheinen erst per
+**„Preview & Go Live"** auf der Wand. Updates laufen **ohne Neuladen** per WebSocket.
 
-## Drei Modi
+## Playlists & Contents
 
-1. **Diashow** – Bilder **und** Videos als Endlos-Diashow mit Crossfade.
-   Anzeigedauer pro Bild einstellbar. Upload mit sortierbarer Liste (Drag & Drop),
-   einzeln löschbar, optionaler 18:16-Zuschnitt (= 9:8) für Bilder.
-2. **YouTube-Playlist** – mehrere YouTube-Videos nacheinander im Vollbild
-   (YouTube IFrame Player API, automatischer Übergang beim Videoende).
-3. **Willkommen** – eine frei schreibbare Botschaft (Standard
-   „Herzlich Willkommen Gast") formatfüllend, mit wählbaren Vorlagen.
+Das Inhaltsmodell ist hierarchisch:
+
+- **Content** – der Hintergrund einer Übertragung, immer in eine Playlist gekapselt.
+  Typen: **Farbe**, **Bild**, **Video**, **YouTube**, **Webseite** (sowie der
+  vorbereitete, noch nicht aktive Typ **Bildschirm**/Screenshare). Je Content sind
+  Anzeigedauer, Stummschaltung, Zuschnitt (Cover) bzw. Farbe einstellbar; Bilder
+  haben optional einen 18:16-Zuschnitt (= 9:8) beim Upload.
+- **Playlist** – eine geordnete Liste von Einträgen; ein Eintrag ist entweder ein
+  Content **oder** eine Referenz auf eine andere Playlist (Verschachtelung; wird
+  inline abgespielt). Jede Playlist hat eine Nachfolge-Aktion: **Loop** (von vorn),
+  **Stop** (Standbild) oder **Nächste** (Verweis auf eine andere Playlist).
+- **Start (Wurzel)** – eine Playlist ist als Start markiert und beginnt die Übertragung.
+
+Das **Willkommens-Overlay** (frei schreibbare Botschaft mit wählbaren Vorlagen)
+liegt unverändert **über** dem laufenden Hintergrund und wird unter `/overlay` bearbeitet.
 
 ## Installation & Start
 
@@ -46,8 +57,10 @@ Port ändern: `PORT=8080 npm start`.
 
 ## Persistenz
 
-Der gesamte Zustand (Modus + Einstellungen + Medienliste) liegt in `state.json`
-und überlebt einen Neustart. Hochgeladene Dateien liegen in `uploads/`.
+Der **Entwurf** liegt in `state.json`, der veröffentlichte (Wand-)Zustand in
+`live.json`; beide überleben einen Neustart. Hochgeladene Dateien liegen in
+`uploads/`. Alte, modus-basierte `state.json`/`live.json` werden beim Start
+automatisch ins Playlist-Modell migriert (vorhandene Medien bleiben erhalten).
 
 ## Robustheit
 
@@ -61,46 +74,55 @@ und überlebt einen Neustart. Hochgeladene Dateien liegen in `uploads/`.
 Diese Standardannahmen sind im Code kommentiert und leicht änderbar:
 
 1. **Erreichbarkeit:** nur LAN (keine Internet-Freigabe, keine Authentifizierung).
-2. **Diashow-Videos:** schalten standardmäßig **nach Videoende** weiter;
-   alternativ „nach Anzeigedauer" pro Diashow im UI wählbar.
-3. **Crop-Seitenverhältnis:** **18:16 (= 9:8)**, exakt wie gefordert. Falls 16:9
-   gemeint war, in `public/js/control.js` (`aspectRatio: 18 / 16`) und der Hinweis
-   in `server.js` anpassen.
-4. **Authentifizierung:** keine (rein lokal). Bei Bedarf nachrüstbar.
-5. **Mehrere Anzeigen:** unterstützt (WebSocket-Broadcast an alle Clients).
+2. **Video/YouTube:** schalten standardmäßig **nach Videoende** weiter; alternativ
+   „nach Dauer" je Content wählbar.
+3. **Verschachtelung:** eine verschachtelt eingebundene Playlist wird einmal inline
+   durchlaufen; ihre Nachfolge-Aktion (`after`) greift nur, wenn sie selbst die
+   Start-/Top-Playlist ist. Zyklen werden serverseitig verhindert.
+4. **Crop-Seitenverhältnis:** **18:16 (= 9:8)**, exakt wie gefordert. Falls 16:9
+   gemeint war, in `public/js/control.js` (`aspectRatio: 18 / 16`) anpassen.
+5. **Authentifizierung:** keine (rein lokal). Bei Bedarf nachrüstbar.
+6. **Mehrere Anzeigen:** unterstützt (WebSocket-Broadcast an alle Clients).
 
 ### Hinweise
 
 - **YouTube/Autoplay & Ton:** Browser erlauben Autoplay meist nur stummgeschaltet.
-  Im YouTube-Modus gibt es daher eine Stumm-Option (Standard: stumm). Für Ton
+  YouTube-/Video-Contents haben daher eine Stumm-Option (Standard: stumm). Für Ton
   ggf. einmal manuell auf dem Anzeige-Gerät interagieren.
-- **Diashow-Videos** werden zur Autoplay-Kompatibilität immer stummgeschaltet
-  abgespielt.
-- **Internet nötig** nur für: YouTube-Modus sowie die per CDN geladene Crop-
-  Bibliothek (Cropper.js) auf der Steuerseite. Diashow- und Willkommens-Modus
+- **Eigene Videos** werden zur Autoplay-Kompatibilität stummgeschaltet abgespielt.
+- **Internet nötig** nur für: YouTube/Webseiten-Contents sowie die per CDN geladene
+  Crop-Bibliothek (Cropper.js). Farb-, Bild-, Video- und Overlay-Inhalte
   funktionieren vollständig offline.
 
 ## Projektstruktur
 
 ```
-server.js              Express + WebSocket + Upload, state.json-Persistenz
-state.json             persistierter Zustand (wird automatisch erzeugt)
+server.js              Express + WebSocket + Upload, Playlist-API, Persistenz
+state.json             Entwurf (wird automatisch erzeugt)
+live.json              veröffentlichter Wand-Zustand
 uploads/               hochgeladene Bilder/Videos
 public/
-  index.html           Steuerseite /
+  index.html           Live-Monitor /
+  settings.html        Programmplanung /settings (Playlist-Editor)
   screen.html          Anzeige /screen
-  css/control.css
-  css/screen.css
-  js/control.js
-  js/screen.js
+  overlay.html         Willkommens-Overlay /overlay
+  css/control.css  css/monitor.css  css/screen.css
+  js/control.js    js/monitor.js    js/screen.js    js/overlay.js
 ```
 
 ## API (intern)
 
-- `GET  /api/state` – aktuellen Zustand abrufen
-- `POST /api/state` – Teil-Zustand setzen (`{ mode, slideshow, youtube, welcome }`)
-- `POST /api/upload` – Datei hochladen (Feld `file`)
-- `DELETE /api/media/:id` – Medium löschen
-- `POST /api/media/order` – Reihenfolge setzen (`{ order: [id, ...] }`)
+- `GET  /api/state` – Entwurf abrufen (`?view=live` für den Wand-Zustand)
+- `POST /api/state` – Willkommens-Overlay setzen (`{ welcome }`)
+- `POST /api/golive` – Entwurf auf die Wand veröffentlichen
+- `POST /api/playlist` – Playlist anlegen; `/:id/rename`, `DELETE /:id`
+- `POST /api/playlist/root` – Start-Playlist (Wurzel) setzen (`{ id }`)
+- `POST /api/playlist/:id/after` – Nachfolge setzen (`{ after, nextId }`)
+- `POST /api/playlist/:id/items` – Eintrag anhängen (Content oder `{ kind:'playlist', refId }`)
+- `PATCH /api/playlist/:id/items/:itemId` – Content-Felder ändern (`{ content }`)
+- `DELETE /api/playlist/:id/items/:itemId` – Eintrag entfernen
+- `POST /api/playlist/:id/items/order` – Reihenfolge setzen (`{ order: [itemId, ...] }`)
+- `POST /api/upload` – Bild/Video hochladen + anhängen (Felder `file`, `playlistId`)
+- `POST /api/link` – Webseiten-Content anhängen (`{ url, playlistId }`); `/api/link/recheck`
+- `POST /api/volume` / `GET /api/volume` – Wand-Systemlautstärke (wpctl)
 - WebSocket auf demselben Port: Server pusht `{ type: 'state', state }` an alle Clients.
-# screenwall

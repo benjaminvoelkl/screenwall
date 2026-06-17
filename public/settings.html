@@ -15,111 +15,68 @@
       <h1>Programmplanung</h1>
     </div>
     <div class="topbar-actions">
-      <button id="preview-open" class="icon-btn hidden" title="Vorschau des Entwurfs" aria-label="Vorschau">👁</button>
-      <button id="go-live" class="go-live hidden" title="Entwurf auf die Wand veröffentlichen">
-        Live
+      <button id="go-live" class="go-live hidden" title="Entwurf ansehen und auf die Wand veröffentlichen">
+        Preview &amp; Go Live
       </button>
     </div>
   </header>
 
-  <nav class="modes">
-    <button class="mode-btn" data-mode="slideshow">Diashow</button>
-    <button class="mode-btn" data-mode="youtube">YouTube-Playlist</button>
-    <button class="mode-btn" data-mode="link">Link</button>
+  <!-- Playlist-Verwaltung -->
+  <nav class="pl-toolbar">
+    <label>Playlist
+      <select id="pl-select"></select>
+    </label>
+    <button id="pl-new" class="btn">+ Neue Playlist</button>
+    <button id="pl-rename" class="btn ghost">Umbenennen</button>
+    <button id="pl-delete" class="btn ghost">Löschen</button>
+    <button id="pl-setroot" class="btn">★ Als Start setzen</button>
+    <span id="pl-root-badge" class="root-badge hidden">★ Startet die Übertragung</span>
   </nav>
 
   <main>
-    <!-- ===== Modus 1: Diashow ===== -->
-    <section class="panel" id="panel-slideshow">
-      <h2>Diashow</h2>
-
-      <div class="seq-bar">
-        <label>Sequenz
-          <select id="ss-seq-select"></select>
-        </label>
-        <button id="ss-seq-new" class="btn">+ Neue Sequenz</button>
-        <button id="ss-seq-rename" class="btn ghost">Umbenennen</button>
-        <button id="ss-seq-delete" class="btn ghost">Löschen</button>
-      </div>
-      <p class="hint">Die gewählte Sequenz wird auf <code>/screen</code> angezeigt und hier bearbeitet.</p>
-
-      <div class="row">
-        <label>Anzeigedauer pro Bild (Sekunden)
-          <input type="number" id="ss-duration" min="1" max="120" step="1" />
-        </label>
-        <label>Video-Weiterschaltung
-          <select id="ss-videomode">
-            <option value="end">nach Videoende</option>
-            <option value="duration">nach Anzeigedauer</option>
+    <section class="panel active" id="panel-playlist">
+      <!-- Nachfolge-Aktion der Playlist -->
+      <div class="row after-row">
+        <label>Wenn die Playlist endet
+          <select id="pl-after">
+            <option value="loop">Wiederholen (Loop)</option>
+            <option value="stop">Stoppen (Standbild)</option>
+            <option value="next">Nächste Playlist abspielen</option>
           </select>
         </label>
+        <label id="pl-next-wrap" class="hidden">Nächste Playlist
+          <select id="pl-next"></select>
+        </label>
       </div>
 
-      <div class="upload-area">
-        <label class="file-btn">
-          + Medien hochladen (Bilder &amp; Videos)
-          <input type="file" id="ss-file" accept="image/*,video/*" multiple hidden />
+      <!-- Inhalte hinzufügen -->
+      <div class="add-bar">
+        <button class="btn" data-add="color">+ Farbe</button>
+        <label class="file-btn">+ Bild/Video
+          <input type="file" id="pl-file" accept="image/*,video/*" multiple hidden />
         </label>
         <label class="checkbox">
-          <input type="checkbox" id="ss-crop-toggle" />
-          Bilder vor Upload auf 18:16 zuschneiden
+          <input type="checkbox" id="pl-crop-toggle" /> Bilder vor Upload auf 18:16 zuschneiden
         </label>
+        <span class="add-inline">
+          <input type="text" id="pl-yt-input" placeholder="YouTube-Link oder Video-ID" />
+          <button class="btn" data-add="youtube">+ YouTube</button>
+        </span>
+        <span class="add-inline">
+          <input type="text" id="pl-web-input" placeholder="https://… oder example.com" />
+          <button class="btn" data-add="webpage">+ Webseite</button>
+        </span>
+        <span class="add-inline">
+          <select id="pl-sub-select"></select>
+          <button class="btn" data-add="playlist">+ Playlist einbetten</button>
+        </span>
+        <button class="btn ghost" data-add="screenshare" title="Bildschirmübertragung – vorbereitet">+ Bildschirm (bald)</button>
       </div>
 
-      <ul id="ss-list" class="media-list"></ul>
-      <p class="hint">Reihenfolge per Drag &amp; Drop ändern. Klick auf 🗑 löscht ein Medium.</p>
-    </section>
-
-    <!-- ===== Modus 2: YouTube ===== -->
-    <section class="panel" id="panel-youtube">
-      <h2>YouTube-Playlist</h2>
-
-      <div class="seq-bar">
-        <label>Sequenz
-          <select id="yt-seq-select"></select>
-        </label>
-        <button id="yt-seq-new" class="btn">+ Neue Sequenz</button>
-        <button id="yt-seq-rename" class="btn ghost">Umbenennen</button>
-        <button id="yt-seq-delete" class="btn ghost">Löschen</button>
-      </div>
-      <p class="hint">Die gewählte Sequenz wird auf <code>/screen</code> abgespielt und hier bearbeitet.</p>
-
-      <div class="row">
-        <label class="grow">YouTube-Link oder Video-ID hinzufügen
-          <input type="text" id="yt-input" placeholder="https://youtu.be/… oder Video-ID" />
-        </label>
-        <button id="yt-add" class="btn">Hinzufügen</button>
-      </div>
-      <label class="checkbox">
-        <input type="checkbox" id="yt-muted" />
-        Stumm abspielen (für zuverlässigen Autoplay empfohlen)
-      </label>
-      <label class="checkbox">
-        <input type="checkbox" id="yt-crop" />
-        Video formatfüllend zuschneiden (Bildschirm füllen statt schwarzer Balken)
-      </label>
-      <ul id="yt-list" class="media-list"></ul>
-      <p class="hint">Reihenfolge per Drag &amp; Drop ändern.</p>
-    </section>
-
-    <!-- ===== Modus 3: Link ===== -->
-    <section class="panel" id="panel-link">
-      <h2>Link</h2>
-      <div class="row">
-        <label class="grow">Webseiten-Link hinzufügen
-          <input type="text" id="link-input" placeholder="https://… oder example.com" />
-        </label>
-        <button id="link-add" class="btn">Hinzufügen</button>
-      </div>
-      <div class="row">
-        <label>Anzeigedauer pro Link (Sekunden)
-          <input type="number" id="link-duration" min="3" max="600" step="1" />
-        </label>
-      </div>
-      <ul id="link-list" class="media-list"></ul>
-      <p class="hint">Bei mehreren Links wird im Vollbild rotiert; ein einzelner bleibt stehen.
-        Reihenfolge per Drag &amp; Drop ändern, 🗑 löscht. Hinweis: Manche Seiten
-        (z.&nbsp;B. Google, YouTube-Startseite) verbieten die Einbettung und bleiben dann leer.</p>
+      <ul id="pl-items" class="media-list"></ul>
+      <p class="hint">Ein einzelner Inhalt wird immer über eine Playlist gespielt.
+        Eine Playlist kann andere Playlists enthalten. Reihenfolge per Drag &amp; Drop
+        ändern; 🗑 entfernt einen Eintrag.</p>
     </section>
   </main>
 
@@ -135,27 +92,6 @@
     </span>
     <a class="screen-link" href="/screen" target="_blank">/screen öffnen ↗</a>
   </footer>
-
-  <!-- Live-Vorschau des Displays (eingebettetes /screen, maßstabsgetreu 18:16) -->
-  <div id="preview-modal" class="modal hidden">
-    <div class="preview-box">
-      <div class="preview-head">
-        <span>Vorschau (Entwurf – noch nicht live) · 4320×3840 (18:16, 2× 4K hochkant)</span>
-        <button id="preview-close" class="btn ghost">Schließen</button>
-      </div>
-      <div id="preview-stage" class="preview-stage">
-        <div id="preview-frame-wrap" class="preview-frame-wrap">
-          <iframe id="preview-frame" title="Live-Vorschau"
-                  allow="autoplay; encrypted-media; fullscreen; picture-in-picture"></iframe>
-        </div>
-      </div>
-      <div class="preview-controls">
-        <input type="range" id="preview-seek" min="0" max="1000" value="0" step="1" disabled />
-        <span id="preview-time" class="preview-time">–</span>
-      </div>
-      <p class="hint">Positionsleiste springt auf Wand <em>und</em> Vorschau an dieselbe Stelle (Diashow-Videos &amp; YouTube).</p>
-    </div>
-  </div>
 
   <!-- Go-Live-Bestätigung: Vorschau des Entwurfs + Slide-to-go-live -->
   <div id="golive-modal" class="modal hidden">

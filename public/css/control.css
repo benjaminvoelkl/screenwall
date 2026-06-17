@@ -308,6 +308,60 @@ textarea { resize: vertical; }
 .wc-presets .btn.apply { padding: 7px 12px; }
 .wc-presets .btn.overwrite { padding: 7px 10px; }
 
+/* ===== Playlist-Editor ===== */
+.pl-toolbar {
+  display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap;
+  padding: 16px 20px 0; max-width: 880px; margin: 0 auto;
+}
+.pl-toolbar label { flex-direction: column; }
+.pl-toolbar select { min-width: 220px; }
+.pl-toolbar .btn { padding: 10px 14px; }
+.root-badge {
+  align-self: center; color: #f6c453; font-size: 13px; font-weight: 700;
+  letter-spacing: 0.03em; padding-bottom: 4px;
+}
+
+.after-row { align-items: flex-end; }
+.after-row select { min-width: 220px; }
+
+.add-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin: 4px 0 16px; padding-bottom: 16px; border-bottom: 1px solid var(--border);
+}
+.add-bar .btn { padding: 9px 13px; font-size: 14px; }
+.add-inline { display: flex; align-items: center; gap: 6px; }
+.add-inline input[type="text"] { min-width: 200px; }
+.add-inline select { min-width: 150px; }
+
+/* Einzelner Inhalt/Eintrag: Steuerung pro Typ unter dem Namen. */
+.media-item { align-items: flex-start; }
+.media-item .drag { padding-top: 14px; }
+.media-item .del { padding-top: 10px; }
+.color-swatch { display: inline-block; border: 1px solid var(--border); }
+.type-badge {
+  display: flex; align-items: center; justify-content: center;
+  font-size: 24px; color: var(--text);
+}
+.item-playlist { background: #1b2330; border-color: #2d3a52; }
+.item-playlist .meta .name { color: #cdd8ee; }
+
+.content-ctrls {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 8px;
+}
+.ctrl {
+  flex-direction: row; align-items: center; gap: 6px;
+  color: var(--muted); font-size: 13px;
+}
+.ctrl input[type="number"] { width: 78px; padding: 6px 8px; font-size: 14px; }
+.ctrl input[type="color"] {
+  width: 40px; height: 32px; padding: 2px; background: var(--panel-2);
+  border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
+}
+.ctrl select { padding: 6px 8px; font-size: 14px; }
+.ctrl.checkbox { color: var(--text); }
+.embed-status { font-size: 13px; }
+.btn.tiny { padding: 5px 10px; font-size: 12px; }
+
 /* Crop-Modal */
 .modal {
   position: fixed; inset: 0; background: rgba(0,0,0,0.7);

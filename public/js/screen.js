@@ -1,34 +1,44 @@
 // Anzeige-Logik für /screen.
-// Holt den Zustand per WebSocket, reagiert live und rendert je Modus.
-// Bei Verbindungsabbruch wird automatisch neu verbunden.
+//
+// Inhaltsmodell: PLAYLISTS + CONTENTS.
+//   - Der Zustand enthält `playlists` (Registry byId + rootId).
+//   - Der Scheduler "flacht" die aktuelle Top-Playlist aus (verschachtelte
+//     Playlists werden inline eingefügt) und spielt die Contents der Reihe nach.
+//   - Am Listenende greift die Nachfolge-Aktion der Top-Playlist:
+//     loop (von vorn) / stop (stehenbleiben) / next (Verweis auf nextId).
+//
+// Sichten (wie bisher):
+//   'wall'    = echte Wand: Quelle, läuft eigenständig mit Timern, sendet einen
+//               nowplaying-Heartbeat.
+//   'monitor' = eingebetteter Live-Mirror (/?  -> /screen?view=live): KEINE
+//               eigenen Timer; folgt strikt dem nowplaying der Wand.
+//   'preview' = Entwurf-Vorschau in den Einstellungen: eigenständiger Player
+//               (zeigt den Entwurf) + meldet Position an die Positionsleiste.
 
 (() => {
-  const els = {
-    offline: document.getElementById('offline'),
-    welcome: document.getElementById('welcome'),
-    wcCard: document.querySelector('.wc-card'),
-    wcHeadline: document.getElementById('wc-headline'),
-    wcLeftLogo: document.getElementById('wc-left-logo'),
-    wcLeftText: document.getElementById('wc-left-text'),
-    wcRightLogo: document.getElementById('wc-right-logo'),
-    wcRightText: document.getElementById('wc-right-text'),
-    slideshow: document.getElementById('slideshow'),
-    youtube: document.getElementById('youtube'),
-    link: document.getElementById('link'),
-    linkFrame: document.getElementById('link-frame'),
-    linkNotice: document.getElementById('link-notice'),
-    linkNoticeUrl: document.getElementById('link-notice-url')
-  };
+  const $ = (id) => document.getElementById(id);
+  const FADE = 800; // ms, Crossfade-Dauer (siehe .layer-Transition in screen.css)
 
-  let current = null; // letzter Zustand
-  // Sicht dieses /screen-Tabs:
-  //  'wall'    = echte Wand (eigenständig, Live)
-  //  'monitor' = eingebetteter Live-Mirror auf der Startseite (?view=live, Live)
-  //  'preview' = eingebettete Entwurf-Vorschau in den Einstellungen
+  const els = {
+    offline: $('offline'),
+    welcome: $('welcome'),
+    wcCard: document.querySelector('.wc-card'),
+    wcHeadline: $('wc-headline'),
+    wcLeftLogo: $('wc-left-logo'),
+    wcLeftText: $('wc-left-text'),
+    wcRightLogo: $('wc-right-logo'),
+    wcRightText: $('wc-right-text'),
+    ytLayer: $('yt-layer')
+  };
+  const slots = [$('slot-0'), $('slot-1')];
+
+  let state = null;
+
   const embedded = !!(window.parent && window.parent !== window);
   const forceLive = new URLSearchParams(location.search).get('view') === 'live';
   const viewer = !embedded ? 'wall' : (forceLive ? 'monitor' : 'preview');
-  const isPreview = viewer === 'preview'; // einzige Sicht, die den Entwurf zeigt
+  const isPreview = viewer === 'preview';
+  const autoAdvance = viewer !== 'monitor'; // Monitor wird vom Heartbeat gesteuert.
 
   // ---- WebSocket mit Auto-Reconnect --------------------------------------
   let ws = null;
@@ -36,536 +46,379 @@
 
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    // Rolle: Vorschau = Entwurf; Monitor = Live + folgt der Wand; Wand = Live (Quelle).
     const roleParam = viewer === 'preview' ? '?role=preview'
       : viewer === 'monitor' ? '?role=monitor' : '';
     ws = new WebSocket(`${proto}://${location.host}/${roleParam}`);
 
-    ws.addEventListener('open', () => {
-      els.offline.classList.add('hidden');
-    });
+    ws.addEventListener('open', () => els.offline.classList.add('hidden'));
     ws.addEventListener('message', (ev) => {
       try {
         const msg = JSON.parse(ev.data);
         if (msg.type === 'state') applyState(msg.state);
         else if (msg.type === 'cmd' && msg.cmd === 'seek') seekCurrent(msg.time);
-        // Wand meldet, was gerade läuft -> Live-Monitor springt dorthin (folgt der Wand).
         else if (msg.type === 'cmd' && msg.cmd === 'nowplaying') { if (viewer === 'monitor') applyNowPlaying(msg); }
-        // Eine Sicht fragt beim Start -> die Wand antwortet mit ihrer Position.
         else if (msg.type === 'cmd' && msg.cmd === 'sync-request') { if (viewer === 'wall') sendNowPlaying(); }
       } catch (_) { /* ignorieren */ }
     });
-    ws.addEventListener('close', () => {
-      els.offline.classList.remove('hidden');
-      scheduleReconnect();
-    });
+    ws.addEventListener('close', () => { els.offline.classList.remove('hidden'); scheduleReconnect(); });
     ws.addEventListener('error', () => ws.close());
   }
-
   function scheduleReconnect() {
     if (reconnectTimer) return;
-    reconnectTimer = setTimeout(() => {
-      reconnectTimer = null;
-      connect();
-    }, 1500);
+    reconnectTimer = setTimeout(() => { reconnectTimer = null; connect(); }, 1500);
   }
-
   connect();
 
-  // Fallback: aktuellen Zustand auch per HTTP holen (falls WS verzögert).
-  // Entwurf-Vorschau holt den Entwurf, Wand + Live-Monitor den Live-Zustand.
+  // Fallback: aktuellen Zustand auch per HTTP holen (Entwurf für Vorschau, sonst Live).
   fetch('/api/state' + (isPreview ? '' : '?view=live'))
     .then((r) => r.json()).then(applyState).catch(() => {});
 
-  // ---- Zustand anwenden ---------------------------------------------------
-  function applyState(state) {
-    const prev = current;
-    current = state;
-
-    // Modus-Sichtbarkeit
-    const mode = state.mode;
-    toggle(els.slideshow, mode === 'slideshow');
-    toggle(els.youtube, mode === 'youtube');
-    toggle(els.link, mode === 'link');
-
-    // Willkommens-Overlay liegt über jedem Modus (Diashow, YouTube, Link)
-    // und wird allein über `visible` ein-/ausgeschaltet.
-    renderWelcome(state.welcome);
-
-    if (mode === 'slideshow') Slideshow.update(state.slideshow, prev?.slideshow, prev?.mode !== 'slideshow');
-    else Slideshow.stop();
-
-    els.youtube.classList.toggle('crop', !!state.youtube.crop);
-    if (mode === 'youtube') YT.update(state.youtube, prev?.youtube, prev?.mode !== 'youtube');
-    else YT.stop();
-
-    if (mode === 'link') LinkShow.update(state.link, prev?.link, prev?.mode !== 'link');
-    else LinkShow.stop();
+  // ===== Zustand anwenden =================================================
+  function applyState(s) {
+    if (!s) return;
+    state = s;
+    renderWelcome(s.welcome || {});
+    afterStateRebuild();
   }
 
   function toggle(el, on) { el.classList.toggle('hidden', !on); }
 
-  // ---- Willkommens-Overlay (über jedem Modus) -----------------------------
+  // ===== Willkommens-Overlay (über dem Hintergrund) =======================
   function renderWelcome(w) {
     w = w || {};
-    // Unabhängig vom Modus; nur über `visible` gesteuert.
     const on = w.visible !== false;
     toggle(els.welcome, on);
     if (!on) return;
-
-    // Alle vorhandenen tpl-*-Klassen entfernen (nicht nur die alten drei),
-    // sonst bleibt beim Umschalten der vorige Stil kleben.
     [...els.welcome.classList].filter((c) => c.startsWith('tpl-'))
       .forEach((c) => els.welcome.classList.remove(c));
     els.welcome.classList.add(`tpl-${w.template || 'elegant'}`);
     els.wcCard.style.setProperty('--wc-blur', `${w.blur ?? 18}px`);
-
     els.wcHeadline.textContent = w.headline || '';
     els.wcHeadline.style.fontSize = `${w.fontSize || 8}vw`;
-
     setSide(els.wcLeftLogo, els.wcLeftText, w.left);
     setSide(els.wcRightLogo, els.wcRightText, w.right);
   }
-
   function setSide(logoEl, textEl, side) {
     side = side || {};
-    if (side.logo) {
-      logoEl.src = `/uploads/${side.logo}`;
-      logoEl.classList.remove('hidden');
-    } else {
-      logoEl.removeAttribute('src');
-      logoEl.classList.add('hidden');
-    }
-    // Breite steuert die Größe (wirkt bei jedem Seitenverhältnis), Höhe folgt.
+    if (side.logo) { logoEl.src = `/uploads/${side.logo}`; logoEl.classList.remove('hidden'); }
+    else { logoEl.removeAttribute('src'); logoEl.classList.add('hidden'); }
     logoEl.style.width = `${side.logoSize || 22}vw`;
     logoEl.style.height = 'auto';
     textEl.textContent = side.text || '';
     textEl.style.fontSize = `${side.textSize || 4.8}vw`;
-    // Logo über oder unter dem Text (per Flex-order).
     const logoBottom = side.logoPos === 'bottom';
     logoEl.style.order = logoBottom ? '1' : '0';
     textEl.style.order = logoBottom ? '0' : '1';
   }
 
-  // ---- Modus 1: Diashow (eigene Crossfade-Lösung) -------------------------
-  const Slideshow = (() => {
-    let timer = null;
-    let idx = 0;
-    let mediaKey = '';
-    let media = [];
-    let cfg = {};
-
-    function keyOf(m) { return m.map((x) => x.id).join('|'); }
-
-    function update(s, _prev, justEntered) {
-      cfg = s;
-      // Aktive Sequenz auswählen; deren Medien werden angezeigt.
-      const seq = (s.sequences || []).find((x) => x.id === s.activeSequenceId)
-        || (s.sequences || [])[0];
-      const newMedia = seq ? seq.media : [];
-      // Sequenzwechsel zählt als Änderung -> Neuaufbau.
-      const newKey = (s.activeSequenceId || '') + '::' + keyOf(newMedia);
-      const changed = newKey !== mediaKey;
-      media = newMedia;
-      mediaKey = newKey;
-
-      if (changed || justEntered) {
-        build();
-        idx = 0;
-        syncedMediaId = '';
-        show(0);
-        schedule();
-      } else {
-        // Nur Einstellungen (z. B. Dauer) geändert – Timer neu takten.
-        schedule();
-      }
-    }
-
-    function build() {
-      els.slideshow.innerHTML = '';
-      for (const m of media) {
-        const slide = document.createElement('div');
-        slide.className = 'slide';
-        if (m.type === 'video') {
-          const v = document.createElement('video');
-          v.src = `/uploads/${m.filename}`;
-          v.muted = true;        // Autoplay nur stummgeschaltet erlaubt.
-          v.playsInline = true;
-          v.preload = 'auto';
-          slide.appendChild(v);
-        } else {
-          const img = document.createElement('img');
-          img.src = `/uploads/${m.filename}`;
-          slide.appendChild(img);
-        }
-        els.slideshow.appendChild(slide);
-      }
-    }
-
-    function slidesEls() { return Array.from(els.slideshow.children); }
-
-    function show(i) {
-      const slides = slidesEls();
-      if (!slides.length) return;
-      slides.forEach((s, k) => s.classList.toggle('active', k === i));
-      const active = slides[i];
-      const video = active.querySelector('video');
-      // Andere Videos stoppen.
-      slides.forEach((s, k) => {
-        const v = s.querySelector('video');
-        if (v && k !== i) { v.pause(); v.currentTime = 0; }
-      });
-      if (video) {
-        video.currentTime = 0;
-        video.play().catch(() => {});
-      }
-    }
-
-    function next() {
-      const slides = slidesEls();
-      if (!slides.length) return;
-      idx = (idx + 1) % slides.length;
-      show(idx);
-      schedule();
-    }
-
-    function schedule() {
-      clearTimeout(timer);
-      const slides = slidesEls();
-      if (slides.length <= 1) return; // nichts weiterzuschalten
-      const active = slides[idx];
-      const video = active && active.querySelector('video');
-
-      if (video && cfg.videoMode === 'end') {
-        // Bei Videoende weiterschalten (Entscheidung: Standard = bis Videoende).
-        video.onended = () => next();
-        // Sicherheitsnetz, falls 'ended' nicht feuert.
-        timer = setTimeout(() => next(), (cfg.durationSec || 6) * 1000 + 600000);
-      } else {
-        timer = setTimeout(() => next(), Math.max(1, cfg.durationSec || 6) * 1000);
-      }
-    }
-
-    function stop() {
-      clearTimeout(timer);
-      timer = null;
-      slidesEls().forEach((s) => {
-        const v = s.querySelector('video');
-        if (v) v.pause();
-      });
-    }
-
-    function activeVideo() {
-      const active = slidesEls()[idx];
-      return active ? active.querySelector('video') : null;
-    }
-    function seek(t) {
-      const v = activeVideo();
-      if (v) { try { v.currentTime = t; v.play().catch(() => {}); } catch (_) {} }
-    }
-    function getPos() {
-      const v = activeVideo();
-      if (v && isFinite(v.duration) && v.duration > 0) {
-        return { time: v.currentTime, duration: v.duration };
-      }
-      return null;
-    }
-
-    // Welches Medium läuft gerade an welcher Stelle? (für den Wand-Heartbeat)
-    function nowPlaying() {
-      const m = media[idx];
-      if (!m) return null;
-      const v = activeVideo();
-      return { mediaId: m.id, time: v ? v.currentTime : 0 };
-    }
-
-    // Auf das Medium + die Position der Wand springen (nur in der Vorschau).
-    let syncedMediaId = '';
-    function syncTo(mediaId, time) {
-      if (mediaId === syncedMediaId) return;
-      const i = media.findIndex((m) => m.id === mediaId);
-      if (i < 0) return;
-      syncedMediaId = mediaId;
-      if (i !== idx) { idx = i; show(idx); schedule(); }
-      const v = activeVideo();
-      if (v && time > 0) { try { v.currentTime = time; v.play().catch(() => {}); } catch (_) {} }
-    }
-
-    return { update, stop, seek, getPos, nowPlaying, syncTo };
-  })();
-
-  // ---- Modus 2: YouTube (IFrame API) --------------------------------------
+  // ===== YouTube-Player (persistent, IFrame-API) ==========================
   const YT = (() => {
-    let player = null;
-    let ready = false;
-    let pendingApply = null;
-    let videos = [];
-    let muted = true;
-    let videoKey = '';
-    let started = false;
+    let player = null, ready = false, pending = null;
+    let onEndedCb = null, curVideoId = null;
 
-    // YouTube IFrame API laden.
     const tag = document.createElement('script');
     tag.src = 'https://www.youtube.com/iframe_api';
     document.head.appendChild(tag);
+    window.onYouTubeIframeAPIReady = () => create();
 
-    window.onYouTubeIframeAPIReady = () => {
-      player = new YT_API_Player();
-    };
-
-    function YT_API_Player() {
-      return new window.YT.Player('yt-player', {
-        width: '100%',
-        height: '100%',
+    function create() {
+      player = new window.YT.Player('yt-player', {
+        width: '100%', height: '100%',
         playerVars: { autoplay: 1, controls: 0, rel: 0, modestbranding: 1, playsinline: 1 },
         events: {
           onReady: () => {
             ready = true;
-            // Autoplay-Policy moderner Browser: das iframe braucht ein
-            // allow="autoplay" und das Abspielen muss explizit (stumm) erfolgen.
             try { player.getIframe().setAttribute('allow', 'autoplay; encrypted-media; fullscreen; playsinline'); } catch (_) {}
-            if (pendingApply) { const p = pendingApply; pendingApply = null; apply(...p); }
+            if (pending) { const p = pending; pending = null; p(); }
           },
-          onStateChange: (e) => {
-            // Bei ENDED automatisch zum nächsten Video.
-            if (e.data === window.YT.PlayerState.ENDED) playNext();
-          },
-          onError: () => playNext() // Defektes Video überspringen.
+          onStateChange: (e) => { if (e.data === window.YT.PlayerState.ENDED && onEndedCb) onEndedCb(); },
+          onError: () => { if (onEndedCb) onEndedCb(); }
         }
       });
     }
 
-    let idx = 0;
-    function keyOf(v) { return v.map((x) => x.videoId).join('|'); }
-
-    function update(s, _prev, justEntered) {
-      muted = s.muted !== false;
-      // Aktive Sequenz auswählen (wie die Diashow); deren Videos werden gespielt.
-      const seq = (s.sequences || []).find((x) => x.id === s.activeSequenceId)
-        || (s.sequences || [])[0];
-      videos = seq ? seq.videos : [];
-      // Sequenzwechsel zählt als Änderung -> Neustart der Wiedergabe.
-      const newKey = (s.activeSequenceId || '') + '::' + keyOf(videos);
-      const restart = newKey !== videoKey || justEntered || !started;
-      videoKey = newKey;
-      if (!ready) { pendingApply = [restart]; return; }
-      apply(restart);
-    }
-
-    function apply(restart) {
-      if (!videos.length) { try { player.stopVideo(); } catch (_) {} started = false; return; }
-      if (muted) { try { player.mute(); } catch (_) {} }
-      else { try { player.unMute(); } catch (_) {} }
-      if (restart) {
-        idx = 0;
-        syncedVideoId = '';
-        load();
-        started = true;
+    // opts: { videoId, muted, startSeconds, force, onEnded }
+    function play(opts) {
+      onEndedCb = opts.onEnded || null;
+      const muted = opts.muted !== false;
+      if (!opts.videoId) return;
+      if (!ready) { pending = () => play(opts); return; }
+      if (opts.videoId === curVideoId && !opts.force) {
+        try { muted ? player.mute() : player.unMute(); player.playVideo(); } catch (_) {}
+        return;
       }
-    }
-
-    function load() {
-      const v = videos[idx];
-      if (!v) return;
+      curVideoId = opts.videoId;
       try {
-        player.loadVideoById(v.videoId);
-        // Stummgeschaltetes Abspielen ist von der Autoplay-Policy erlaubt und
-        // wird hier explizit angestoßen, falls autoplay ignoriert wird.
-        if (muted) { player.mute(); player.playVideo(); }
-      } catch (_) {}
-    }
-
-    function playNext() {
-      if (!videos.length) return;
-      idx = (idx + 1) % videos.length;
-      load();
-    }
-
-    function stop() {
-      try { if (player && player.stopVideo) player.stopVideo(); } catch (_) {}
-      started = false;
-    }
-
-    function seek(t) {
-      try { if (ready && player && player.seekTo) { player.seekTo(t, true); player.playVideo(); } } catch (_) {}
-    }
-    function getPos() {
-      try {
-        if (ready && player && player.getDuration) {
-          const d = player.getDuration();
-          if (d > 0) return { time: player.getCurrentTime(), duration: d };
-        }
-      } catch (_) {}
-      return null;
-    }
-
-    // Welches Video läuft gerade an welcher Stelle? (für den Wand-Heartbeat und
-    // den Playing-Indikator/Playtime in der Steuerung)
-    function nowPlaying() {
-      if (!ready || !player || !videos[idx]) return null;
-      let time = 0, duration = 0;
-      try { time = player.getCurrentTime ? player.getCurrentTime() : 0; } catch (_) {}
-      try { duration = player.getDuration ? player.getDuration() : 0; } catch (_) {}
-      const v = videos[idx];
-      return { videoId: v.videoId, id: v.id, time, duration };
-    }
-
-    // Auf das Video + die Position der Wand springen (nur in der Vorschau).
-    // Springt pro Video nur einmal -> kein ständiges Nachseeken/Ruckeln.
-    let syncedVideoId = '';
-    function syncTo(videoId, time) {
-      if (!ready || !player || videoId === syncedVideoId) return;
-      const i = videos.findIndex((v) => v.videoId === videoId);
-      if (i < 0) return;
-      syncedVideoId = videoId;
-      idx = i;
-      try {
-        player.loadVideoById({ videoId, startSeconds: Math.max(0, time || 0) });
-        if (muted) player.mute();
+        player.loadVideoById({ videoId: opts.videoId, startSeconds: Math.max(0, opts.startSeconds || 0) });
+        muted ? player.mute() : player.unMute();
         player.playVideo();
       } catch (_) {}
     }
-
-    return { update, stop, seek, getPos, nowPlaying, syncTo };
+    function pause() { try { if (player && player.pauseVideo) player.pauseVideo(); } catch (_) {} }
+    function seek(t) { try { if (ready && player && player.seekTo) { player.seekTo(t, true); player.playVideo(); } } catch (_) {} }
+    function getPos() {
+      try { if (ready && player && player.getDuration) { const d = player.getDuration(); if (d > 0) return { time: player.getCurrentTime(), duration: d }; } } catch (_) {}
+      return null;
+    }
+    return { play, pause, seek, getPos };
   })();
 
-  // ---- Modus 3: Link (Webseiten im Vollbild, rotierend) -------------------
-  const LinkShow = (() => {
-    let timer = null;
-    let idx = 0;
-    let items = [];
-    let cfg = {};
-    let key = '';
+  // ===== Playlist-Scheduler ===============================================
+  let topId = null;      // aktuelle Top-Playlist (Übertragung)
+  let seq = [];          // ausgeflachte Content-Liste: [{ itemId, content }]
+  let idx = 0;
+  let current = null;    // { itemId, type, contentJSON, videoEl }
+  let activeSlot = 0;    // welcher der beiden Crossfade-Slots gerade sichtbar ist
+  let advanceTimer = null, cleanupTimer = null, monFallback = null;
 
-    function keyOf(a) { return a.map((x) => `${x.id}:${x.url}`).join('|'); }
-
-    function update(s, _prev, justEntered) {
-      cfg = s || {};
-      items = cfg.items || [];
-      const newKey = keyOf(items);
-      const changed = newKey !== key;
-      key = newKey;
-      if (changed || justEntered) {
-        idx = 0;
-        show();
-        schedule();
-      } else {
-        schedule();
-      }
+  // Top-Playlist rekursiv ausflachen; verschachtelte Playlists inline einfügen.
+  function flatten(plId, byId, visited) {
+    const pl = byId[plId];
+    if (!pl || visited.has(plId)) return [];
+    const v = new Set(visited); v.add(plId);
+    const out = [];
+    for (const it of pl.items) {
+      if (it.kind === 'content') out.push({ itemId: it.id, content: it.content });
+      else if (it.kind === 'playlist') out.push(...flatten(it.refId, byId, v));
     }
-
-    function show() {
-      const it = items[idx];
-      // Vom Server als nicht-einbettbar erkannt -> Hinweis statt schwarzer Seite.
-      const blocked = !!it && it.embeddable === false;
-      toggle(els.linkNotice, blocked);
-      if (blocked) {
-        els.linkNoticeUrl.textContent = it.url;
-        if (els.linkFrame.getAttribute('src') !== 'about:blank') els.linkFrame.src = 'about:blank';
-        return;
-      }
-      const url = it ? it.url : 'about:blank';
-      // Nur neu laden, wenn sich die URL ändert (vermeidet ständiges Neuladen).
-      if (els.linkFrame.getAttribute('src') !== url) els.linkFrame.src = url;
-    }
-
-    function schedule() {
-      clearTimeout(timer);
-      if (items.length <= 1) return; // einzelner Link bleibt stehen
-      timer = setTimeout(next, Math.max(3, cfg.durationSec || 15) * 1000);
-    }
-
-    function next() {
-      if (!items.length) return;
-      idx = (idx + 1) % items.length;
-      show();
-      schedule();
-    }
-
-    function stop() {
-      clearTimeout(timer);
-      timer = null;
-      // Seite entladen, damit Audio/Video im iframe stoppt.
-      if (els.linkFrame.getAttribute('src') && els.linkFrame.getAttribute('src') !== 'about:blank') {
-        els.linkFrame.src = 'about:blank';
-      }
-    }
-
-    // Welcher Link wird gerade angezeigt? (für den Live-Indikator der Steuerung)
-    function nowPlaying() {
-      const it = items[idx];
-      return it ? { id: it.id, url: it.url } : null;
-    }
-
-    return { update, stop, nowPlaying };
-  })();
-
-  // ---- Video-Seek (Befehl aus der Live-Vorschau) --------------------------
-  // Seekt das aktuell laufende Video. Da der Befehl an alle Clients geht,
-  // springen Wand und Vorschau gleichzeitig -> synchron.
-  function seekCurrent(time) {
-    const mode = current && current.mode;
-    if (mode === 'slideshow') Slideshow.seek(time);
-    else if (mode === 'youtube') YT.seek(time);
+    return out;
   }
 
-  // ---- Synchronisierung Wand <-> Vorschau ---------------------------------
-  // Die echte Wand sendet laufend, welches Video an welcher Stelle läuft.
+  function rebuild() {
+    const pls = state && state.playlists;
+    if (!pls || !pls.byId) { seq = []; return; }
+    if (!topId || !pls.byId[topId]) topId = pls.rootId;
+    seq = pls.byId[topId] ? flatten(topId, pls.byId, new Set()) : [];
+  }
+
+  // Nach einem Statewechsel: Anzeige möglichst stabil halten (kein Neustart,
+  // wenn der gerade gezeigte Content weiter existiert).
+  function afterStateRebuild() {
+    rebuild();
+    const curId = current && current.itemId;
+    const found = curId ? seq.findIndex((e) => e.itemId === curId) : -1;
+    if (autoAdvance) {
+      if (found === -1) { idx = 0; seq.length ? showCurrent() : clearStage(); }
+      else {
+        idx = found;
+        // Inhaltliche Änderung desselben Items -> in-place neu zeigen.
+        if (JSON.stringify(seq[idx].content) !== current.contentJSON) showCurrent();
+      }
+    } else {
+      if (!seq.length) clearStage();
+      else if (found !== -1) idx = found;
+      scheduleMonitorFallback();
+    }
+  }
+
+  function scheduleMonitorFallback() {
+    if (viewer !== 'monitor') return;
+    clearTimeout(monFallback);
+    // Falls keine Wand antwortet (kein nowplaying), nach kurzer Zeit selbst den
+    // ersten Content zeigen (Best Effort), damit der Monitor nicht schwarz bleibt.
+    monFallback = setTimeout(() => { if (!current && seq.length) { idx = 0; showContent(seq[0]); } }, 2500);
+  }
+
+  function clearTimer() { clearTimeout(advanceTimer); advanceTimer = null; }
+
+  function clearStage() {
+    clearTimer();
+    [slots[0], slots[1], els.ytLayer].forEach((L) => L.classList.remove('active'));
+    slots.forEach((s) => { s.innerHTML = ''; });
+    YT.pause();
+    current = null;
+  }
+
+  function showCurrent(opts) {
+    if (!seq.length) { clearStage(); return; }
+    if (idx >= seq.length) idx = 0;
+    showContent(seq[idx], opts);
+  }
+
+  // Einen Content in die Bühne bringen (Crossfade) und – auf Wand/Vorschau –
+  // das Weiterschalten planen.
+  function showContent(entry, opts) {
+    opts = opts || {};
+    const c = entry.content;
+    clearTimer();
+
+    if (c.type === 'youtube') {
+      els.ytLayer.classList.toggle('crop', !!c.crop);
+      YT.play({
+        videoId: c.videoId, muted: c.muted !== false,
+        startSeconds: opts.startSeconds || 0,
+        force: viewer !== 'monitor', // Wand/Vorschau starten neu; Monitor steigt ein
+        onEnded: (autoAdvance && c.videoMode !== 'duration') ? advance : null
+      });
+      activate(els.ytLayer);
+      current = { itemId: entry.itemId, type: 'youtube', contentJSON: JSON.stringify(c), videoEl: null };
+    } else {
+      const slot = slots[1 - activeSlot];
+      slot.innerHTML = '';
+      const node = buildNode(c);
+      slot.appendChild(node);
+      const v = node.querySelector('video');
+      if (v) { try { v.currentTime = opts.startSeconds || 0; } catch (_) {} v.play().catch(() => {}); }
+      activate(slot);
+      activeSlot = 1 - activeSlot;
+      current = { itemId: entry.itemId, type: c.type, contentJSON: JSON.stringify(c), videoEl: v || null };
+    }
+
+    if (autoAdvance) scheduleAdvance(entry);
+  }
+
+  // Sichtbare Schicht setzen; nicht sichtbare Slots nach dem Fade entladen
+  // (stoppt Video/Audio in iframes).
+  function activate(layer) {
+    [slots[0], slots[1], els.ytLayer].forEach((L) => L.classList.toggle('active', L === layer));
+    clearTimeout(cleanupTimer);
+    cleanupTimer = setTimeout(() => {
+      slots.forEach((s) => { if (s !== layer) s.innerHTML = ''; });
+      if (layer !== els.ytLayer) YT.pause();
+    }, FADE + 80);
+  }
+
+  function buildNode(c) {
+    const node = document.createElement('div');
+    node.className = 'content';
+    if (c.type === 'color') {
+      node.style.background = c.color || '#000000';
+    } else if (c.type === 'image') {
+      const img = document.createElement('img');
+      img.src = `/uploads/${c.filename}`;
+      img.className = c.crop ? 'cover' : 'contain';
+      node.appendChild(img);
+    } else if (c.type === 'video') {
+      const v = document.createElement('video');
+      v.src = `/uploads/${c.filename}`;
+      v.muted = c.muted !== false; v.playsInline = true; v.preload = 'auto';
+      v.className = c.crop ? 'cover' : 'contain';
+      node.appendChild(v);
+    } else if (c.type === 'webpage') {
+      if (c.embeddable === false) node.appendChild(buildNotice('Diese Seite erlaubt keine Einbettung', c.url));
+      else {
+        const f = document.createElement('iframe');
+        f.src = c.url || 'about:blank';
+        f.setAttribute('allow', 'autoplay; fullscreen; encrypted-media');
+        f.setAttribute('referrerpolicy', 'no-referrer');
+        node.appendChild(f);
+      }
+    } else if (c.type === 'screenshare') {
+      node.appendChild(buildNotice('Bildschirmübertragung', c.url || '(noch nicht verfügbar)'));
+    }
+    return node;
+  }
+
+  function buildNotice(title, url) {
+    const wrap = document.createElement('div');
+    wrap.className = 'link-notice';
+    const box = document.createElement('div'); box.className = 'link-notice-box';
+    const t = document.createElement('div'); t.className = 'link-notice-title'; t.textContent = title;
+    const u = document.createElement('div'); u.className = 'link-notice-url'; u.textContent = url || '';
+    box.appendChild(t); box.appendChild(u); wrap.appendChild(box);
+    return wrap;
+  }
+
+  function scheduleAdvance(entry) {
+    clearTimer();
+    const c = entry.content;
+    if (c.type === 'video' && c.videoMode !== 'duration') {
+      if (current && current.videoEl) current.videoEl.onended = () => advance();
+      advanceTimer = setTimeout(advance, (c.durationSec || 6) * 1000 + 600000); // Sicherheitsnetz
+      return;
+    }
+    if (c.type === 'youtube' && c.videoMode !== 'duration') {
+      advanceTimer = setTimeout(advance, 600000); // YT meldet Ende via onEnded; nur Sicherheitsnetz
+      return;
+    }
+    advanceTimer = setTimeout(advance, Math.max(1, c.durationSec || 6) * 1000);
+  }
+
+  function advance() {
+    if (!autoAdvance) return;
+    clearTimer();
+    idx++;
+    if (idx < seq.length) { showCurrent(); return; }
+    applyAfter();
+  }
+
+  function applyAfter() {
+    const pl = state.playlists.byId[topId];
+    const after = pl ? pl.after : 'loop';
+    if (after === 'stop') return; // letztes Bild bleibt stehen
+    if (after === 'next' && pl.nextId && state.playlists.byId[pl.nextId]) topId = pl.nextId;
+    rebuild();
+    idx = 0;
+    seq.length ? showCurrent() : clearStage();
+  }
+
+  // ===== Wand <-> Monitor / Vorschau ======================================
+  function curContent() { return seq[idx] ? seq[idx].content : null; }
+
   function sendNowPlaying() {
-    // Nur die echte Wand ist die Quelle; Monitor/Vorschau melden nichts.
     if (viewer !== 'wall' || !ws || ws.readyState !== WebSocket.OPEN) return;
-    const mode = current && current.mode;
-    let np = null;
-    if (mode === 'youtube') np = YT.nowPlaying();
-    else if (mode === 'slideshow') np = Slideshow.nowPlaying();
-    else if (mode === 'link') np = LinkShow.nowPlaying();
-    // Immer mit aktuellem Modus melden, damit die Steuerung den Live-Rahmen
-    // korrekt setzen/löschen kann.
-    ws.send(JSON.stringify({ type: 'cmd', cmd: 'nowplaying', mode, ...(np || {}) }));
+    if (!current) { ws.send(JSON.stringify({ type: 'cmd', cmd: 'nowplaying' })); return; }
+    let time = 0, duration = 0;
+    if (current.type === 'youtube') { const p = YT.getPos(); if (p) { time = p.time; duration = p.duration; } }
+    else if (current.type === 'video' && current.videoEl) { time = current.videoEl.currentTime || 0; duration = current.videoEl.duration || 0; }
+    const c = curContent();
+    ws.send(JSON.stringify({
+      type: 'cmd', cmd: 'nowplaying',
+      contentId: current.itemId, ctype: current.type,
+      videoId: (c && c.videoId) || null, time, duration
+    }));
   }
-  // Die Vorschau springt auf die gemeldete Position der Wand.
+
+  // Monitor: strikt der Wandposition folgen.
   function applyNowPlaying(np) {
-    if (np.mode !== (current && current.mode)) return;
-    if (np.mode === 'youtube') YT.syncTo(np.videoId, np.time);
-    else if (np.mode === 'slideshow') Slideshow.syncTo(np.mediaId, np.time);
+    if (viewer !== 'monitor') return;
+    if (!np || !np.contentId) return;
+    const i = seq.findIndex((e) => e.itemId === np.contentId);
+    if (i === -1) return;
+    idx = i;
+    if (!current || current.itemId !== np.contentId) {
+      showContent(seq[i], { startSeconds: np.time || 0 });
+    }
   }
+
   function requestSync() {
     if (embedded && ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'cmd', cmd: 'sync-request' }));
     }
   }
 
+  function seekCurrent(time) {
+    if (!current) return;
+    if (current.type === 'youtube') YT.seek(time);
+    else if (current.type === 'video' && current.videoEl) {
+      try { current.videoEl.currentTime = time; current.videoEl.play().catch(() => {}); } catch (_) {}
+    }
+  }
+
   if (viewer === 'preview') {
-    // Entwurf-Vorschau: aktuelle Position an die Positionsleiste der Steuerung
-    // melden und bei Bedarf einen sofortigen Sync anfordern.
     setInterval(() => {
-      const mode = current && current.mode;
-      let pos = null;
-      if (mode === 'slideshow') pos = Slideshow.getPos();
-      else if (mode === 'youtube') pos = YT.getPos();
+      let pos = null; const mode = current ? current.type : null;
+      if (current && current.type === 'youtube') pos = YT.getPos();
+      else if (current && current.type === 'video' && current.videoEl) {
+        const v = current.videoEl;
+        if (isFinite(v.duration) && v.duration > 0) pos = { time: v.currentTime, duration: v.duration };
+      }
       window.parent.postMessage({ type: 'screen-pos', mode, pos }, '*');
     }, 250);
-    requestSync();
-    setInterval(requestSync, 2000); // bis die Wand antwortet / bei Modeswechsel
+    requestSync(); setInterval(requestSync, 2000);
   } else if (viewer === 'monitor') {
-    // Live-Monitor (Startseite): der Wand folgen – beim Laden und periodisch
-    // ihre Position anfordern, damit er nicht bei jedem Reload von vorn startet.
-    requestSync();
-    setInterval(requestSync, 2000);
+    requestSync(); setInterval(requestSync, 2000);
   } else {
-    // Wand: Quelle. Heartbeat, damit Monitor & Steuerung folgen können.
     setInterval(sendNowPlaying, 1000);
   }
 
-  // ---- Mauszeiger nach Inaktivität ausblenden -----------------------------
+  // ===== Mauszeiger nach Inaktivität ausblenden ===========================
   let idleTimer = null;
   function resetIdle() {
     document.body.classList.remove('idle');
     clearTimeout(idleTimer);
     idleTimer = setTimeout(() => document.body.classList.add('idle'), 3000);
   }
-  ['mousemove', 'mousedown', 'keydown', 'touchstart'].forEach((e) =>
-    window.addEventListener(e, resetIdle)
-  );
+  ['mousemove', 'mousedown', 'keydown', 'touchstart'].forEach((e) => window.addEventListener(e, resetIdle));
   resetIdle();
 })();

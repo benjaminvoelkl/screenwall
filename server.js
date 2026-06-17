@@ -1,13 +1,21 @@
-// Screenwall – lokaler Server für Steuerseite (/) und Vollbild-Anzeige (/screen).
+// Screenwall – lokaler Server für Steuerseite (/settings), Live-Monitor (/) und
+// Vollbild-Anzeige (/screen).
 //
 // Architektur (siehe README):
-//   - Express liefert beide Seiten + statische Assets + Uploads aus.
-//   - Der komplette Anzeige-Zustand liegt in state.json (überlebt Neustart).
-//   - Jede Änderung wird per WebSocket an ALLE verbundenen Clients gepusht
-//     (mehrere /screen-Geräte und mehrere Steuerseiten bleiben synchron).
+//   - Express liefert die Seiten + statische Assets + Uploads aus.
+//   - Der komplette Anzeige-Zustand liegt in state.json (Entwurf) und live.json
+//     (veröffentlicht/Wand) und überlebt einen Neustart.
+//   - Jede Änderung wird per WebSocket an ALLE verbundenen Clients gepusht.
 //
-// Datenfluss: / ändert etwas -> HTTP-Request an Server -> Server speichert
-// state.json und broadcastet den neuen Zustand -> alle /screen reagieren sofort.
+// Inhaltsmodell: PLAYLISTS + CONTENTS (ersetzt die früheren Modi).
+//   - Ein "Content" ist der Hintergrund einer Übertragung: color | image | video
+//     | youtube | webpage (+ vorbereitet: screenshare). Er wird IMMER in eine
+//     Playlist gekapselt.
+//   - Eine "Playlist" ist eine geordnete Liste von Einträgen; ein Eintrag ist
+//     entweder ein Content ODER eine Referenz auf eine andere Playlist
+//     (Verschachtelung). Jede Playlist hat eine Nachfolge-Aktion `after`:
+//     'next' (Verweis auf `nextId`), 'loop' oder 'stop'.
+//   - `rootId` bestimmt die Start-Playlist der Übertragung.
 
 import express from 'express';
 import { WebSocketServer } from 'ws';
@@ -31,8 +39,6 @@ const UPLOAD_DIR = join(__dirname, 'uploads');
 const PUBLIC_DIR = join(__dirname, 'public');
 
 // Audio-Ziel für die Lautstärkesteuerung (PipeWire/WirePlumber via wpctl).
-// Standard: der Default-Sink (robust über Reboots). Per Env überschreibbar,
-// z. B. AUDIO_SINK=35 für ein festes Gerät.
 const AUDIO_SINK = process.env.AUDIO_SINK || '@DEFAULT_AUDIO_SINK@';
 
 if (!existsSync(UPLOAD_DIR)) mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -40,88 +46,213 @@ if (!existsSync(UPLOAD_DIR)) mkdirSync(UPLOAD_DIR, { recursive: true });
 // ---------------------------------------------------------------------------
 // Zustands-Modell
 // ---------------------------------------------------------------------------
-// Annahmen (laut Aufgabenstellung, falls nicht anders angegeben):
-//   - Crop-Seitenverhältnis 18:16 (= 9:8), exakt wie gefordert.
-//   - Diashow-Videos laufen bis zum Videoende ("videoMode": "end"); alternativ
-//     feste Anzeigedauer ("duration"). Standard: bis zum Ende.
-//   - Kein Auth/Passwortschutz (rein lokal).
-//   - Mehrere /screen-Geräte gleichzeitig sind erlaubt (WS-Broadcast).
+const CONTENT_TYPES = ['color', 'image', 'video', 'youtube', 'webpage', 'screenshare'];
+
 const DEFAULT_STATE = {
-  mode: 'slideshow', // 'slideshow' | 'youtube' | 'link'
-  slideshow: {
-    durationSec: 6,
-    // Verhalten bei Video-Slides: 'end' = bis Videoende, 'duration' = feste Dauer.
-    videoMode: 'end',
-    // Mehrere benannte Sequenzen; die aktive wird auf /screen angezeigt.
-    activeSequenceId: 'default',
-    sequences: [
-      { id: 'default', name: 'Sequenz 1', media: [] } // media: [{ id, type, filename, name }]
-    ]
+  // Playlists als flache Registry (byId) + Wurzel-Playlist (rootId).
+  playlists: {
+    rootId: 'pl-default',
+    byId: {
+      'pl-default': { id: 'pl-default', name: 'Playlist 1', after: 'loop', nextId: null, items: [] }
+    }
   },
-  youtube: {
-    muted: true, // Browser erlauben Autoplay meist nur stummgeschaltet.
-    crop: false, // true = Video formatfüllend zuschneiden (Cover) statt Balken.
-    // Wie die Diashow: mehrere benannte Sequenzen, die aktive läuft auf /screen.
-    activeSequenceId: 'yt-default',
-    sequences: [
-      { id: 'yt-default', name: 'Sequenz 1', videos: [] } // videos: [{ id, videoId, title }]
-    ]
-  },
-  // Modus „Link": Webseiten werden nacheinander im Vollbild (iframe) gezeigt.
-  link: {
-    durationSec: 15, // Anzeigedauer pro Link in Sekunden (bei mehreren)
-    items: [] // [{ id, url, title }]
-  },
-  // Willkommens-Overlay, das ÜBER der laufenden Diashow eingeblendet wird
-  // (Dual-TV-Begrüßungsscreen: zentrierte Karte mit Blur-Hintergrund).
+  // Willkommens-Overlay (liegt ÜBER dem Hintergrund; KEIN Content-Typ).
   welcome: {
-    visible: true, // Overlay ein-/ausblenden
-    template: 'elegant', // 'elegant' | 'modern' | 'festive' (nur Schrift/Farbe)
-    fontSize: 8, // Überschrift-Größe in vw
-    blur: 18, // Stärke des Blur-Hintergrunds in px
-    headline: 'Herzlich Willkommen', // zentrale Überschrift oben
-    // Pro Seite: logo (Dateiname), text, Textgröße (vw), Logogröße (vh),
-    // logoPos = 'top' | 'bottom' (Logo über oder unter dem Text, per Drag&Drop).
+    visible: true,
+    template: 'elegant',
+    fontSize: 8,
+    blur: 18,
+    headline: 'Herzlich Willkommen',
     left: { logo: null, text: '', textSize: 4.8, logoSize: 22, logoPos: 'top' },
     right: { logo: null, text: '', textSize: 4.8, logoSize: 22, logoPos: 'top' },
-    // Gespeicherte Presets: [{ id, name, config: {template,fontSize,blur,headline,left,right} }]
     presets: []
   }
 };
 
+const newId = () => randomUUID();
+
+// ---- Content / Item / Playlist normalisieren -------------------------------
+function defaultDuration(type) {
+  return (type === 'webpage' || type === 'screenshare') ? 15 : 6;
+}
+
+// Einen Content säubern/normalisieren. Behält nur die für den Typ relevanten Felder.
+function normalizeContent(c) {
+  c = (c && typeof c === 'object') ? c : {};
+  const type = CONTENT_TYPES.includes(c.type) ? c.type : 'color';
+  const out = { type, name: typeof c.name === 'string' ? c.name : '' };
+
+  if (type === 'color') out.color = typeof c.color === 'string' ? c.color : '#000000';
+  if (type === 'image' || type === 'video') out.filename = typeof c.filename === 'string' ? c.filename : null;
+  if (type === 'youtube') out.videoId = typeof c.videoId === 'string' ? c.videoId : null;
+  if (type === 'webpage' || type === 'screenshare') {
+    out.url = typeof c.url === 'string' ? c.url : '';
+    if (type === 'webpage') {
+      out.embeddable = typeof c.embeddable === 'boolean' ? c.embeddable : null;
+      out.reason = typeof c.reason === 'string' ? c.reason : '';
+    }
+  }
+  // Anzeigedauer (für color/image/webpage/screenshare sowie video/youtube bei
+  // videoMode==='duration').
+  out.durationSec = (typeof c.durationSec === 'number' && c.durationSec > 0)
+    ? c.durationSec : defaultDuration(type);
+  if (type === 'video' || type === 'youtube') {
+    out.videoMode = c.videoMode === 'duration' ? 'duration' : 'end';
+    out.muted = c.muted !== false;
+  }
+  if (type === 'image' || type === 'video' || type === 'youtube') out.crop = !!c.crop;
+  return out;
+}
+
+function normalizeItem(it) {
+  if (!it || typeof it !== 'object') return null;
+  const id = typeof it.id === 'string' ? it.id : newId();
+  if (it.kind === 'playlist') {
+    if (typeof it.refId !== 'string') return null;
+    return { id, kind: 'playlist', refId: it.refId };
+  }
+  return { id, kind: 'content', content: normalizeContent(it.content) };
+}
+
+// Entfernt Verschachtelungs-Zyklen (Playlist, die sich – direkt oder indirekt –
+// selbst enthält). Eine Rückwärtskante im DFS wird gekappt.
+function breakContainmentCycles(byId) {
+  const mark = {}; // id -> 1 (im Stack) | 2 (fertig)
+  function dfs(id) {
+    mark[id] = 1;
+    const pl = byId[id];
+    if (pl) {
+      pl.items = pl.items.filter((it) => {
+        if (it.kind !== 'playlist') return true;
+        const child = it.refId;
+        if (!byId[child]) return false;     // kaputte Referenz
+        if (mark[child] === 1) return false; // Rückwärtskante -> Zyklus kappen
+        if (!mark[child]) dfs(child);
+        return true;
+      });
+    }
+    mark[id] = 2;
+  }
+  for (const id of Object.keys(byId)) if (!mark[id]) dfs(id);
+}
+
+function normalizePlaylists(p) {
+  const src = (p && p.byId && typeof p.byId === 'object') ? p.byId : {};
+  const byId = {};
+  for (const [id, pl] of Object.entries(src)) {
+    if (!pl || typeof pl !== 'object') continue;
+    const items = Array.isArray(pl.items) ? pl.items.map(normalizeItem).filter(Boolean) : [];
+    byId[id] = {
+      id,
+      name: typeof pl.name === 'string' ? pl.name : 'Playlist',
+      after: ['next', 'loop', 'stop'].includes(pl.after) ? pl.after : 'loop',
+      nextId: typeof pl.nextId === 'string' ? pl.nextId : null,
+      items
+    };
+  }
+  if (Object.keys(byId).length === 0) {
+    byId['pl-default'] = { id: 'pl-default', name: 'Playlist 1', after: 'loop', nextId: null, items: [] };
+  }
+  // Kaputte Referenzen säubern.
+  for (const pl of Object.values(byId)) {
+    pl.items = pl.items.filter((it) => it.kind !== 'playlist' || byId[it.refId]);
+    if (pl.nextId && !byId[pl.nextId]) pl.nextId = null;
+    if (pl.after === 'next' && !pl.nextId) pl.after = 'loop';
+  }
+  breakContainmentCycles(byId);
+  const rootId = (p && typeof p.rootId === 'string' && byId[p.rootId]) ? p.rootId : Object.keys(byId)[0];
+  return { rootId, byId };
+}
+
+// Alte (modus-basierte) state.json/live.json in das Playlist-Modell überführen.
+// Gibt ein {rootId, byId} zurück oder null, wenn nichts zu migrieren ist.
+function migrateLegacy(loaded) {
+  const byId = {};
+  const order = [];
+  let activeId = null;
+
+  const ss = loaded.slideshow;
+  if (ss && Array.isArray(ss.sequences)) {
+    for (const seq of ss.sequences) {
+      const id = (typeof seq.id === 'string' && seq.id) ? seq.id : newId();
+      const items = (Array.isArray(seq.media) ? seq.media : []).map((m) => ({
+        id: newId(), kind: 'content',
+        content: normalizeContent({
+          type: m.type === 'video' ? 'video' : 'image',
+          name: m.name, filename: m.filename,
+          durationSec: ss.durationSec, videoMode: ss.videoMode
+        })
+      }));
+      byId[id] = { id, name: seq.name || 'Diashow', after: 'loop', nextId: null, items };
+      order.push(id);
+      if (loaded.mode === 'slideshow' && ss.activeSequenceId === seq.id) activeId = id;
+    }
+  }
+
+  const yt = loaded.youtube;
+  if (yt && Array.isArray(yt.sequences)) {
+    for (const seq of yt.sequences) {
+      const id = (typeof seq.id === 'string' && seq.id) ? seq.id : newId();
+      const items = (Array.isArray(seq.videos) ? seq.videos : []).map((v) => ({
+        id: newId(), kind: 'content',
+        content: normalizeContent({
+          type: 'youtube', videoId: v.videoId, name: v.title,
+          muted: yt.muted, crop: yt.crop, videoMode: 'end'
+        })
+      }));
+      byId[id] = { id, name: seq.name || 'YouTube', after: 'loop', nextId: null, items };
+      order.push(id);
+      if (loaded.mode === 'youtube' && yt.activeSequenceId === seq.id) activeId = id;
+    }
+  }
+
+  const link = loaded.link;
+  if (link && Array.isArray(link.items) && link.items.length) {
+    const id = newId();
+    const items = link.items.map((it) => ({
+      id: newId(), kind: 'content',
+      content: normalizeContent({
+        type: 'webpage', url: it.url, name: it.title || it.url,
+        embeddable: it.embeddable, reason: it.reason, durationSec: link.durationSec
+      })
+    }));
+    byId[id] = { id, name: 'Links', after: 'loop', nextId: null, items };
+    order.push(id);
+    if (loaded.mode === 'link') activeId = id;
+  }
+
+  if (order.length === 0) return null;
+  return { rootId: activeId || order[0], byId };
+}
+
 // Rohzustand mit Defaults zusammenführen + normalisieren (für Entwurf und Live).
 function prepareState(loaded) {
   loaded = loaded || {};
-  const merged = {
-    ...structuredClone(DEFAULT_STATE),
-    ...loaded,
-    slideshow: { ...DEFAULT_STATE.slideshow, ...(loaded.slideshow || {}) },
-    youtube: { ...DEFAULT_STATE.youtube, ...(loaded.youtube || {}) },
-    link: { ...DEFAULT_STATE.link, ...(loaded.link || {}) },
-    welcome: { ...DEFAULT_STATE.welcome, ...(loaded.welcome || {}) }
-  };
-  merged.slideshow = normalizeSlideshow(merged.slideshow);
-  merged.youtube = normalizeYoutube(merged.youtube);
-  merged.welcome = normalizeWelcome(merged.welcome);
-  if (merged.mode === 'welcome') merged.mode = 'slideshow'; // alter Modus entfällt
-  return merged;
+  let playlists;
+  if (loaded.playlists && loaded.playlists.byId) {
+    playlists = normalizePlaylists(loaded.playlists);
+  } else {
+    const migrated = migrateLegacy(loaded);
+    playlists = migrated ? normalizePlaylists(migrated) : structuredClone(DEFAULT_STATE.playlists);
+  }
+  const welcome = normalizeWelcome({ ...structuredClone(DEFAULT_STATE.welcome), ...(loaded.welcome || {}) });
+  return { playlists, welcome };
 }
 
 function loadState() {
   if (!existsSync(STATE_FILE)) {
-    saveState(DEFAULT_STATE);
-    return structuredClone(DEFAULT_STATE);
+    const s = prepareState(DEFAULT_STATE);
+    saveState(s);
+    return s;
   }
   try {
     return prepareState(JSON.parse(readFileSync(STATE_FILE, 'utf8')));
   } catch (err) {
     console.error('state.json konnte nicht gelesen werden, nutze Defaults:', err.message);
-    return structuredClone(DEFAULT_STATE);
+    return prepareState(DEFAULT_STATE);
   }
 }
 
-// Veröffentlichten (Live-)Zustand laden; fehlt er, wird er beim Start aus dem
-// Entwurf abgeleitet, damit die Wand sofort etwas anzeigt.
 function loadLive() {
   if (!existsSync(LIVE_FILE)) return null;
   try {
@@ -132,51 +263,10 @@ function loadLive() {
   }
 }
 
-// Stellt sicher, dass slideshow das Sequenz-Modell hat. Migriert auch alte
-// state.json-Dateien, die noch eine einzelne `media`-Liste hatten.
-function normalizeSlideshow(ss) {
-  ss = ss || {};
-  if (!Array.isArray(ss.sequences)) {
-    const media = Array.isArray(ss.media) ? ss.media : [];
-    ss.sequences = [{ id: 'default', name: 'Sequenz 1', media }];
-  }
-  if (ss.sequences.length === 0) {
-    ss.sequences.push({ id: randomUUID(), name: 'Sequenz 1', media: [] });
-  }
-  for (const seq of ss.sequences) if (!Array.isArray(seq.media)) seq.media = [];
-  if (!ss.activeSequenceId || !ss.sequences.some((s) => s.id === ss.activeSequenceId)) {
-    ss.activeSequenceId = ss.sequences[0].id;
-  }
-  delete ss.media; // altes Single-Listen-Feld entfernen
-  return ss;
-}
-
-// Stellt sicher, dass youtube das Sequenz-Modell hat. Migriert alte state.json-
-// Dateien, die noch eine einzelne `videos`-Liste hatten, in die erste Sequenz.
-function normalizeYoutube(yt) {
-  yt = yt || {};
-  if (!Array.isArray(yt.sequences) || yt.sequences.length === 0) {
-    yt.sequences = [{ id: 'yt-default', name: 'Sequenz 1', videos: [] }];
-  }
-  for (const seq of yt.sequences) if (!Array.isArray(seq.videos)) seq.videos = [];
-  // Altes flaches `videos`-Feld übernehmen, falls die Sequenzen noch leer sind.
-  if (Array.isArray(yt.videos) && yt.videos.length) {
-    if (!yt.sequences.some((s) => s.videos.length)) yt.sequences[0].videos = yt.videos;
-  }
-  delete yt.videos;
-  if (!yt.activeSequenceId || !yt.sequences.some((s) => s.id === yt.activeSequenceId)) {
-    yt.activeSequenceId = yt.sequences[0].id;
-  }
-  return yt;
-}
-
-// Stellt das Willkommens-Overlay-Modell sicher und migriert alte state.json-
-// Dateien, die noch ein einzelnes `text`-Feld statt Überschrift + Seiten hatten.
+// Stellt das Willkommens-Overlay-Modell sicher und migriert alte Dateien.
 function normalizeWelcome(w) {
   w = w || {};
-  // Alte Datei (hatte `text` statt `headline`): Text als Überschrift übernehmen.
-  // `text` existiert nur in vor-Migration-Dateien (neue löschen es unten).
-  if (typeof w.text === 'string') w.headline = w.text;
+  if (typeof w.text === 'string') w.headline = w.text; // alte Datei
   if (typeof w.headline !== 'string') w.headline = DEFAULT_STATE.welcome.headline;
   if (typeof w.blur !== 'number') w.blur = DEFAULT_STATE.welcome.blur;
   const d = DEFAULT_STATE.welcome.left;
@@ -191,11 +281,10 @@ function normalizeWelcome(w) {
     };
   }
   if (!Array.isArray(w.presets)) w.presets = [];
-  delete w.text; // altes Single-Text-Feld entfernen
+  delete w.text;
   return w;
 }
 
-// Momentaufnahme der Overlay-Gestaltung (ohne visible/presets) für ein Preset.
 function welcomeConfigSnapshot(w) {
   return {
     template: w.template,
@@ -207,7 +296,6 @@ function welcomeConfigSnapshot(w) {
   };
 }
 
-// Prüft, ob ein Welcome-Modell eine Logo-Datei referenziert (Seiten + Presets).
 function logoUsedIn(w, filename) {
   if (!w) return false;
   if (w.left?.logo === filename || w.right?.logo === filename) return true;
@@ -217,34 +305,64 @@ function logoUsedIn(w, filename) {
   return false;
 }
 
-// Prüft, ob eine Logo-Datei noch irgendwo referenziert wird – im Entwurf ODER
-// im veröffentlichten Live-Zustand. Verhindert, dass ein noch (auf der Wand)
-// genutztes Logo gelöscht wird.
-function logoInUse(filename) {
+// Alle von Contents referenzierten Upload-Dateinamen einer Playlist-Registry.
+function filesUsedInPlaylists(playlists) {
+  const set = new Set();
+  if (!playlists || !playlists.byId) return set;
+  for (const pl of Object.values(playlists.byId)) {
+    for (const it of pl.items) {
+      const c = it.kind === 'content' ? it.content : null;
+      if (c && (c.type === 'image' || c.type === 'video') && c.filename) set.add(c.filename);
+    }
+  }
+  return set;
+}
+
+// Wird eine Upload-Datei noch irgendwo (Entwurf ODER Live; Contents ODER
+// Welcome-Logos) referenziert? Verhindert das Löschen noch genutzter Dateien.
+function fileInUse(filename) {
   if (!filename) return false;
-  return logoUsedIn(state.welcome, filename) || logoUsedIn(live && live.welcome, filename);
+  if (filesUsedInPlaylists(state.playlists).has(filename)) return true;
+  if (live && filesUsedInPlaylists(live.playlists).has(filename)) return true;
+  if (logoUsedIn(state.welcome, filename)) return true;
+  if (live && logoUsedIn(live.welcome, filename)) return true;
+  return false;
 }
 
 let state = loadState(); // Entwurf
 let live = loadLive() || structuredClone(state); // Live (Wand)
 
-function saveState(s = state) {
-  writeFileSync(STATE_FILE, JSON.stringify(s, null, 2));
+function saveState(s = state) { writeFileSync(STATE_FILE, JSON.stringify(s, null, 2)); }
+function saveLive() { writeFileSync(LIVE_FILE, JSON.stringify(live, null, 2)); }
+
+// Gibt es unveröffentlichte Änderungen?
+function isDirty() { return JSON.stringify(state) !== JSON.stringify(live); }
+
+if (!existsSync(LIVE_FILE)) saveLive();
+
+// ---- Playlist-Helfer -------------------------------------------------------
+function getPlaylist(id) { return state.playlists.byId[id]; }
+
+// Erreicht `fromId` über Verschachtelung `targetId`? (für Zyklusprüfung)
+function playlistReaches(fromId, targetId, seen = new Set()) {
+  if (fromId === targetId) return true;
+  if (seen.has(fromId)) return false;
+  seen.add(fromId);
+  const pl = state.playlists.byId[fromId];
+  if (!pl) return false;
+  for (const it of pl.items) {
+    if (it.kind === 'playlist' && playlistReaches(it.refId, targetId, seen)) return true;
+  }
+  return false;
 }
 
-function saveLive() {
-  writeFileSync(LIVE_FILE, JSON.stringify(live, null, 2));
-}
-
-// Entwurf und Live identisch? (Gibt es unveröffentlichte Änderungen?)
-function isDirty() {
-  return JSON.stringify(state) !== JSON.stringify(live);
-}
-
-if (!existsSync(LIVE_FILE)) saveLive(); // Live-Datei beim ersten Start anlegen
-
-function findSequence(id) {
-  return state.slideshow.sequences.find((s) => s.id === id);
+// Datei eines Contents aufräumen, falls nicht mehr referenziert.
+function cleanupContentFile(content) {
+  if (!content) return;
+  if ((content.type === 'image' || content.type === 'video') && content.filename && !fileInUse(content.filename)) {
+    try { unlinkSync(join(UPLOAD_DIR, content.filename)); }
+    catch (err) { console.warn('Datei konnte nicht gelöscht werden:', err.message); }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -254,10 +372,7 @@ const app = express();
 const server = createServer(app);
 
 app.use(express.json({ limit: '2mb' }));
-// Uploads (UUID-Dateinamen, unveränderlich) dürfen gecacht werden.
 app.use('/uploads', express.static(UPLOAD_DIR));
-// Steuer-/Anzeige-Assets nie hart cachen, damit Code-Updates nach einem Reload
-// sofort greifen (verhindert veraltete screen.js auf Kiosk-Displays).
 app.use(express.static(PUBLIC_DIR, {
   setHeaders: (res) => res.set('Cache-Control', 'no-cache')
 }));
@@ -270,22 +385,19 @@ app.get('/screen', (req, res) => {
   res.set('Cache-Control', 'no-cache');
   res.sendFile(join(PUBLIC_DIR, 'screen.html'));
 });
-// Steuerung/Programmplanung (früher unter /). / ist jetzt der Live-Monitor.
 app.get('/settings', (req, res) => {
   res.set('Cache-Control', 'no-cache');
   res.sendFile(join(PUBLIC_DIR, 'settings.html'));
 });
-// Willkommens-Overlay als eigene Seite.
 app.get('/overlay', (req, res) => {
   res.set('Cache-Control', 'no-cache');
   res.sendFile(join(PUBLIC_DIR, 'overlay.html'));
 });
 
-// Aktuellen Zustand holen. `?view=live` liefert den veröffentlichten Zustand
-// (für die echte Wand), sonst den Entwurf (Steuerung + Vorschau).
+// Aktuellen Zustand holen. `?view=live` liefert den veröffentlichten Zustand.
 app.get('/api/state', (req, res) => res.json(req.query.view === 'live' ? live : state));
 
-// "Go Live": den Entwurf veröffentlichen -> erst jetzt ändert sich die Wand.
+// "Go Live": den Entwurf veröffentlichen.
 app.post('/api/golive', (req, res) => {
   live = structuredClone(state);
   saveLive();
@@ -293,22 +405,13 @@ app.post('/api/golive', (req, res) => {
   res.json({ ok: true });
 });
 
-// Zustand (teilweise) aktualisieren. Body = { mode } und/oder
-// { slideshow: {...} } / { youtube: {...} } / { welcome: {...} }.
-// Felder werden flach in den jeweiligen Teil-Zustand gemischt.
+// Teil-Zustand setzen. Nur noch `welcome` (verschachtelt gemergt); die Playlists
+// werden über die eigenen /api/playlist-Routen verwaltet.
 app.post('/api/state', (req, res) => {
   const patch = req.body || {};
-  if (typeof patch.mode === 'string') state.mode = patch.mode;
-  for (const key of ['slideshow', 'youtube', 'link']) {
-    if (patch[key] && typeof patch[key] === 'object') {
-      state[key] = { ...state[key], ...patch[key] };
-    }
-  }
-  // welcome verschachtelt mergen, damit ein Patch von left/right.text nicht das
-  // gespeicherte left/right.logo überschreibt.
   if (patch.welcome && typeof patch.welcome === 'object') {
     const p = patch.welcome;
-    const prev = state.welcome; // vor dem Spread merken, sonst geht logo verloren
+    const prev = state.welcome;
     const next = { ...prev, ...p };
     for (const side of ['left', 'right']) {
       next[side] = { ...prev[side], ...(p[side] && typeof p[side] === 'object' ? p[side] : {}) };
@@ -320,10 +423,151 @@ app.post('/api/state', (req, res) => {
   res.json(state);
 });
 
+// ---------------------------------------------------------------------------
+// Playlist-API
+// ---------------------------------------------------------------------------
+// Neue Playlist anlegen.
+app.post('/api/playlist', (req, res) => {
+  const count = Object.keys(state.playlists.byId).length + 1;
+  const name = (req.body?.name || '').trim() || `Playlist ${count}`;
+  const pl = { id: newId(), name, after: 'loop', nextId: null, items: [] };
+  state.playlists.byId[pl.id] = pl;
+  saveState();
+  broadcast();
+  res.json(pl);
+});
+
+// Playlist umbenennen.
+app.post('/api/playlist/:id/rename', (req, res) => {
+  const pl = getPlaylist(req.params.id);
+  if (!pl) return res.status(404).json({ error: 'Playlist nicht gefunden' });
+  const name = (req.body?.name || '').trim();
+  if (name) pl.name = name;
+  saveState();
+  broadcast();
+  res.json(pl);
+});
+
+// Nachfolge-Aktion setzen: { after: 'next'|'loop'|'stop', nextId? }.
+app.post('/api/playlist/:id/after', (req, res) => {
+  const pl = getPlaylist(req.params.id);
+  if (!pl) return res.status(404).json({ error: 'Playlist nicht gefunden' });
+  const after = req.body?.after;
+  if (!['next', 'loop', 'stop'].includes(after)) return res.status(400).json({ error: 'Ungültige Aktion' });
+  pl.after = after;
+  if (after === 'next') {
+    const nextId = req.body?.nextId;
+    pl.nextId = (typeof nextId === 'string' && state.playlists.byId[nextId]) ? nextId : null;
+    if (!pl.nextId) pl.after = 'loop'; // ohne Ziel kein 'next'
+  } else {
+    pl.nextId = null;
+  }
+  saveState();
+  broadcast();
+  res.json(pl);
+});
+
+// Start-Playlist (Wurzel) setzen.
+app.post('/api/playlist/root', (req, res) => {
+  const id = req.body?.id;
+  if (!id || !state.playlists.byId[id]) return res.status(404).json({ error: 'Playlist nicht gefunden' });
+  state.playlists.rootId = id;
+  saveState();
+  broadcast();
+  res.json({ ok: true, rootId: id });
+});
+
+// Playlist löschen (Dateien ihrer Contents aufräumen; Referenzen säubern).
+app.delete('/api/playlist/:id', (req, res) => {
+  const id = req.params.id;
+  const pl = getPlaylist(id);
+  if (!pl) return res.status(404).json({ error: 'Playlist nicht gefunden' });
+  if (Object.keys(state.playlists.byId).length <= 1) {
+    return res.status(400).json({ error: 'Mindestens eine Playlist erforderlich' });
+  }
+  delete state.playlists.byId[id];
+  // Referenzen aus anderen Playlists entfernen (Items + nextId).
+  for (const other of Object.values(state.playlists.byId)) {
+    other.items = other.items.filter((it) => it.kind !== 'playlist' || it.refId !== id);
+    if (other.nextId === id) { other.nextId = null; if (other.after === 'next') other.after = 'loop'; }
+  }
+  if (state.playlists.rootId === id) {
+    state.playlists.rootId = Object.keys(state.playlists.byId)[0];
+  }
+  // Dateien der gelöschten Playlist aufräumen.
+  for (const it of pl.items) if (it.kind === 'content') cleanupContentFile(it.content);
+  saveState();
+  broadcast();
+  res.json({ ok: true });
+});
+
+// Item (Content oder Sub-Playlist) zu einer Playlist hinzufügen.
+// Body: { kind:'content', content:{...} } oder { kind:'playlist', refId, index? }.
+app.post('/api/playlist/:id/items', (req, res) => {
+  const pl = getPlaylist(req.params.id);
+  if (!pl) return res.status(404).json({ error: 'Playlist nicht gefunden' });
+  const body = req.body || {};
+  let item;
+  if (body.kind === 'playlist') {
+    const refId = body.refId;
+    if (!refId || !state.playlists.byId[refId]) return res.status(400).json({ error: 'Ziel-Playlist fehlt' });
+    if (refId === pl.id || playlistReaches(refId, pl.id)) {
+      return res.status(400).json({ error: 'Verschachtelung würde einen Zyklus erzeugen' });
+    }
+    item = { id: newId(), kind: 'playlist', refId };
+  } else {
+    item = { id: newId(), kind: 'content', content: normalizeContent(body.content) };
+  }
+  const index = Number.isInteger(body.index) ? Math.max(0, Math.min(pl.items.length, body.index)) : pl.items.length;
+  pl.items.splice(index, 0, item);
+  saveState();
+  broadcast();
+  res.json(item);
+});
+
+// Content-Felder eines Items ändern (z. B. Farbe, Dauer, mute, crop, name).
+app.patch('/api/playlist/:id/items/:itemId', (req, res) => {
+  const pl = getPlaylist(req.params.id);
+  if (!pl) return res.status(404).json({ error: 'Playlist nicht gefunden' });
+  const item = pl.items.find((i) => i.id === req.params.itemId);
+  if (!item || item.kind !== 'content') return res.status(404).json({ error: 'Content nicht gefunden' });
+  const patch = (req.body?.content && typeof req.body.content === 'object') ? req.body.content : {};
+  // Typ bleibt erhalten, falls nicht ausdrücklich (und gültig) geändert.
+  item.content = normalizeContent({ ...item.content, ...patch, type: item.content.type });
+  saveState();
+  broadcast();
+  res.json(item);
+});
+
+// Item entfernen (Datei aufräumen, falls Content-Bild/Video & ungenutzt).
+app.delete('/api/playlist/:id/items/:itemId', (req, res) => {
+  const pl = getPlaylist(req.params.id);
+  if (!pl) return res.status(404).json({ error: 'Playlist nicht gefunden' });
+  const idx = pl.items.findIndex((i) => i.id === req.params.itemId);
+  if (idx === -1) return res.status(404).json({ error: 'Item nicht gefunden' });
+  const [removed] = pl.items.splice(idx, 1);
+  saveState(); // erst speichern, damit fileInUse den neuen Zustand sieht
+  if (removed.kind === 'content') cleanupContentFile(removed.content);
+  broadcast();
+  res.json({ ok: true });
+});
+
+// Reihenfolge der Items setzen. Body: { order: [itemId, ...] }.
+app.post('/api/playlist/:id/items/order', (req, res) => {
+  const pl = getPlaylist(req.params.id);
+  if (!pl) return res.status(404).json({ error: 'Playlist nicht gefunden' });
+  const order = req.body?.order;
+  if (!Array.isArray(order)) return res.status(400).json({ error: 'order fehlt' });
+  const byId = new Map(pl.items.map((it) => [it.id, it]));
+  const reordered = order.map((id) => byId.get(id)).filter(Boolean);
+  for (const it of pl.items) if (!order.includes(it.id)) reordered.push(it);
+  pl.items = reordered;
+  saveState();
+  broadcast();
+  res.json(pl);
+});
+
 // --- Systemlautstärke (wpctl) ----------------------------------------------
-// Läuft auf dem Wand-Rechner (Kiosk) und steuert die Ausgabe-Lautstärke der
-// /screen-Wiedergabe (v. a. YouTube-Ton). Setzt voraus, dass der Server als
-// derselbe Benutzer mit Zugriff auf die PipeWire-Session läuft.
 function wpctl(args) {
   return new Promise((resolve, reject) => {
     execFile('wpctl', args, { timeout: 4000 }, (err, stdout, stderr) => {
@@ -337,15 +581,10 @@ async function readVolume() {
   const m = out.match(/Volume:\s*([\d.]+)/);
   return { level: m ? parseFloat(m[1]) : null, muted: /\[MUTED\]/i.test(out) };
 }
-
-// Aktuelle Lautstärke lesen (beim Laden der Steuerseite).
 app.get('/api/volume', async (req, res) => {
   try { res.json(await readVolume()); }
   catch (err) { res.status(500).json({ error: err.message }); }
 });
-
-// Lautstärke setzen ({ level: 0..1 }) und/oder Stummschaltung
-// ({ mute: 'toggle' | true | false }).
 app.post('/api/volume', async (req, res) => {
   const body = req.body || {};
   try {
@@ -363,129 +602,50 @@ app.post('/api/volume', async (req, res) => {
   }
 });
 
-// --- Upload (Modus 1) -------------------------------------------------------
+// --- Upload (Bild/Video-Content) -------------------------------------------
 const storage = multer.diskStorage({
   destination: UPLOAD_DIR,
   filename: (req, file, cb) => {
     const ext = extname(file.originalname).toLowerCase();
-    cb(null, `${randomUUID()}${ext}`);
+    cb(null, `${newId()}${ext}`);
   }
 });
 const upload = multer({
   storage,
-  limits: { fileSize: 500 * 1024 * 1024 }, // 500 MB pro Datei (Videos)
+  limits: { fileSize: 500 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const ok = file.mimetype.startsWith('image/') || file.mimetype.startsWith('video/');
     cb(ok ? null : new Error('Nur Bilder und Videos erlaubt'), ok);
   }
 });
 
-// Upload in eine bestimmte Sequenz (Form-Feld `sequenceId`, sonst die aktive).
+// Datei hochladen und als Content-Item an eine Playlist anhängen.
+// Form-Feld `playlistId` bestimmt das Ziel.
 app.post('/api/upload', upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Keine Datei empfangen' });
-  const seq = findSequence(req.body.sequenceId) || findSequence(state.slideshow.activeSequenceId);
-  if (!seq) return res.status(400).json({ error: 'Sequenz nicht gefunden' });
+  const pl = getPlaylist(req.body.playlistId);
+  if (!pl) {
+    try { unlinkSync(join(UPLOAD_DIR, req.file.filename)); } catch (_) {}
+    return res.status(400).json({ error: 'Playlist nicht gefunden' });
+  }
   const type = req.file.mimetype.startsWith('video/') ? 'video' : 'image';
   const item = {
-    id: randomUUID(),
-    type,
-    filename: req.file.filename,
-    name: req.file.originalname
+    id: newId(), kind: 'content',
+    content: normalizeContent({ type, filename: req.file.filename, name: req.file.originalname })
   };
-  seq.media.push(item);
+  pl.items.push(item);
   saveState();
   broadcast();
   res.json(item);
 });
 
-// Einzelnes Medium löschen (Suche über alle Sequenzen; IDs sind eindeutig).
-app.delete('/api/media/:id', (req, res) => {
-  for (const seq of state.slideshow.sequences) {
-    const idx = seq.media.findIndex((m) => m.id === req.params.id);
-    if (idx !== -1) {
-      const [removed] = seq.media.splice(idx, 1);
-      try {
-        unlinkSync(join(UPLOAD_DIR, removed.filename));
-      } catch (err) {
-        console.warn('Datei konnte nicht gelöscht werden:', err.message);
-      }
-      saveState();
-      broadcast();
-      return res.json({ ok: true });
-    }
-  }
-  res.status(404).json({ error: 'Nicht gefunden' });
-});
-
-// Reihenfolge innerhalb einer Sequenz setzen. Body: { sequenceId, order: [id,...] }.
-app.post('/api/media/order', (req, res) => {
-  const { sequenceId, order } = req.body || {};
-  if (!Array.isArray(order)) return res.status(400).json({ error: 'order fehlt' });
-  const seq = findSequence(sequenceId);
-  if (!seq) return res.status(404).json({ error: 'Sequenz nicht gefunden' });
-  const byId = new Map(seq.media.map((m) => [m.id, m]));
-  const reordered = order.map((id) => byId.get(id)).filter(Boolean);
-  // Eventuell nicht gelistete Medien hinten anhängen (Sicherheit).
-  for (const m of seq.media) if (!order.includes(m.id)) reordered.push(m);
-  seq.media = reordered;
-  saveState();
-  broadcast();
-  res.json(seq);
-});
-
-// --- Sequenz-Verwaltung -----------------------------------------------------
-// Neue Sequenz anlegen (wird direkt aktiv gesetzt, damit man sie befüllen kann).
-app.post('/api/slideshow/sequence', (req, res) => {
-  const name = (req.body?.name || '').trim() || `Sequenz ${state.slideshow.sequences.length + 1}`;
-  const seq = { id: randomUUID(), name, media: [] };
-  state.slideshow.sequences.push(seq);
-  state.slideshow.activeSequenceId = seq.id;
-  saveState();
-  broadcast();
-  res.json(seq);
-});
-
-// Sequenz umbenennen.
-app.post('/api/slideshow/sequence/:id/rename', (req, res) => {
-  const seq = findSequence(req.params.id);
-  if (!seq) return res.status(404).json({ error: 'Sequenz nicht gefunden' });
-  const name = (req.body?.name || '').trim();
-  if (name) seq.name = name;
-  saveState();
-  broadcast();
-  res.json(seq);
-});
-
-// Sequenz löschen (inkl. ihrer Mediendateien). Mindestens eine muss bleiben.
-app.delete('/api/slideshow/sequence/:id', (req, res) => {
-  const seqs = state.slideshow.sequences;
-  if (seqs.length <= 1) return res.status(400).json({ error: 'Mindestens eine Sequenz erforderlich' });
-  const idx = seqs.findIndex((s) => s.id === req.params.id);
-  if (idx === -1) return res.status(404).json({ error: 'Sequenz nicht gefunden' });
-  const [removed] = seqs.splice(idx, 1);
-  for (const m of removed.media) {
-    try { unlinkSync(join(UPLOAD_DIR, m.filename)); } catch (_) { /* egal */ }
-  }
-  if (state.slideshow.activeSequenceId === removed.id) {
-    state.slideshow.activeSequenceId = seqs[0].id;
-  }
-  saveState();
-  broadcast();
-  res.json({ ok: true });
-});
-
-// --- Modus „Link": Einbettbarkeit prüfen + Link hinzufügen ------------------
-// Liest die Antwort-Header der Ziel-URL (server-seitig, daher kein CORS-Problem)
-// und entscheidet, ob die Seite sich in ein iframe einbetten lässt.
-// Rückgabe: embeddable = true | false | null (null = Prüfung nicht möglich).
+// --- Webseiten-Content: Einbettbarkeit prüfen + an Playlist anhängen --------
 async function checkEmbeddable(url) {
   try {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 7000);
     const res = await fetch(url, {
-      method: 'GET',
-      redirect: 'follow',
-      signal: ctrl.signal,
+      method: 'GET', redirect: 'follow', signal: ctrl.signal,
       headers: { 'User-Agent': 'Mozilla/5.0 (Screenwall)' }
     });
     clearTimeout(timer);
@@ -497,7 +657,6 @@ async function checkEmbeddable(url) {
     const m = csp.match(/frame-ancestors([^;]*)/);
     if (m) {
       const val = m[1].trim();
-      // 'none' oder eine Liste ohne Wildcard/fremde Hosts => nicht einbettbar.
       if (/'none'/.test(val) || (!val.includes('*') && !/https?:/.test(val))) {
         return { embeddable: false, reason: `CSP frame-ancestors: ${val}` };
       }
@@ -508,14 +667,19 @@ async function checkEmbeddable(url) {
   }
 }
 
-// Link hinzufügen (mit Einbettbarkeits-Prüfung). Body: { url }.
+// Webseiten-Content hinzufügen. Body: { url, playlistId }.
 app.post('/api/link', async (req, res) => {
   try {
     const url = (req.body?.url || '').trim();
     if (!/^https?:\/\//i.test(url)) return res.status(400).json({ error: 'Ungültige URL' });
+    const pl = getPlaylist(req.body?.playlistId);
+    if (!pl) return res.status(400).json({ error: 'Playlist nicht gefunden' });
     const { embeddable, reason } = await checkEmbeddable(url);
-    const item = { id: randomUUID(), url, title: url, embeddable, reason };
-    state.link.items.push(item);
+    const item = {
+      id: newId(), kind: 'content',
+      content: normalizeContent({ type: 'webpage', url, name: url, embeddable, reason })
+    };
+    pl.items.push(item);
     saveState();
     broadcast();
     res.json(item);
@@ -524,14 +688,18 @@ app.post('/api/link', async (req, res) => {
   }
 });
 
-// Einbettbarkeit eines vorhandenen Links neu prüfen. Body: { id }.
+// Einbettbarkeit eines vorhandenen Webseiten-Contents neu prüfen.
+// Body: { playlistId, itemId }.
 app.post('/api/link/recheck', async (req, res) => {
   try {
-    const item = state.link.items.find((x) => x.id === req.body?.id);
-    if (!item) return res.status(404).json({ error: 'Link nicht gefunden' });
-    const { embeddable, reason } = await checkEmbeddable(item.url);
-    item.embeddable = embeddable;
-    item.reason = reason;
+    const pl = getPlaylist(req.body?.playlistId);
+    const item = pl && pl.items.find((i) => i.id === req.body?.itemId);
+    if (!item || item.kind !== 'content' || item.content.type !== 'webpage') {
+      return res.status(404).json({ error: 'Webseiten-Content nicht gefunden' });
+    }
+    const { embeddable, reason } = await checkEmbeddable(item.content.url);
+    item.content.embeddable = embeddable;
+    item.content.reason = reason;
     saveState();
     broadcast();
     res.json(item);
@@ -541,29 +709,30 @@ app.post('/api/link/recheck', async (req, res) => {
 });
 
 // --- Willkommens-Overlay: Logo-Upload je Seite ------------------------------
-// Lädt ein Logo hoch und hängt es an die linke oder rechte Seite (Form-Feld
-// `side` = 'left' | 'right'). Ein eventuell vorhandenes altes Logo wird gelöscht.
+function logoInUse(filename) {
+  if (!filename) return false;
+  return logoUsedIn(state.welcome, filename) || logoUsedIn(live && live.welcome, filename);
+}
+
 app.post('/api/welcome/logo', upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Keine Datei empfangen' });
   const side = req.body.side === 'right' ? 'right' : 'left';
   const old = state.welcome[side].logo;
   state.welcome[side].logo = req.file.filename;
-  // Altes Logo nur löschen, wenn es nicht noch von einem Preset genutzt wird.
   if (old && old !== req.file.filename && !logoInUse(old)) {
-    try { unlinkSync(join(UPLOAD_DIR, old)); } catch (_) { /* egal */ }
+    try { unlinkSync(join(UPLOAD_DIR, old)); } catch (_) {}
   }
   saveState();
   broadcast();
   res.json({ side, logo: req.file.filename });
 });
 
-// Logo einer Seite entfernen. Body: { side: 'left' | 'right' }.
 app.delete('/api/welcome/logo', (req, res) => {
   const side = req.body?.side === 'right' ? 'right' : 'left';
   const old = state.welcome[side].logo;
   state.welcome[side].logo = null;
   if (old && !logoInUse(old)) {
-    try { unlinkSync(join(UPLOAD_DIR, old)); } catch (_) { /* egal */ }
+    try { unlinkSync(join(UPLOAD_DIR, old)); } catch (_) {}
   }
   saveState();
   broadcast();
@@ -571,17 +740,15 @@ app.delete('/api/welcome/logo', (req, res) => {
 });
 
 // --- Willkommens-Overlay: Presets ------------------------------------------
-// Aktuelle Gestaltung als benanntes Preset speichern.
 app.post('/api/welcome/preset', (req, res) => {
   const name = (req.body?.name || '').trim() || `Preset ${state.welcome.presets.length + 1}`;
-  const preset = { id: randomUUID(), name, config: welcomeConfigSnapshot(state.welcome) };
+  const preset = { id: newId(), name, config: welcomeConfigSnapshot(state.welcome) };
   state.welcome.presets.push(preset);
   saveState();
   broadcast();
   res.json(preset);
 });
 
-// Preset auf das Overlay anwenden (visible bleibt unverändert).
 app.post('/api/welcome/preset/:id/apply', (req, res) => {
   const preset = state.welcome.presets.find((p) => p.id === req.params.id);
   if (!preset) return res.status(404).json({ error: 'Preset nicht gefunden' });
@@ -598,32 +765,25 @@ app.post('/api/welcome/preset/:id/apply', (req, res) => {
   res.json(w);
 });
 
-// Preset überschreiben (mit der aktuellen Gestaltung).
 app.post('/api/welcome/preset/:id/save', (req, res) => {
   const preset = state.welcome.presets.find((p) => p.id === req.params.id);
   if (!preset) return res.status(404).json({ error: 'Preset nicht gefunden' });
   const oldLogos = [preset.config?.left?.logo, preset.config?.right?.logo];
   preset.config = welcomeConfigSnapshot(state.welcome);
-  // Nicht mehr referenzierte Logos der alten Preset-Version aufräumen.
   for (const fn of oldLogos) {
-    if (fn && !logoInUse(fn)) {
-      try { unlinkSync(join(UPLOAD_DIR, fn)); } catch (_) { /* egal */ }
-    }
+    if (fn && !logoInUse(fn)) { try { unlinkSync(join(UPLOAD_DIR, fn)); } catch (_) {} }
   }
   saveState();
   broadcast();
   res.json(preset);
 });
 
-// Preset löschen (und dessen Logos, falls nirgends sonst genutzt).
 app.delete('/api/welcome/preset/:id', (req, res) => {
   const idx = state.welcome.presets.findIndex((p) => p.id === req.params.id);
   if (idx === -1) return res.status(404).json({ error: 'Preset nicht gefunden' });
   const [removed] = state.welcome.presets.splice(idx, 1);
   for (const fn of [removed.config?.left?.logo, removed.config?.right?.logo]) {
-    if (fn && !logoInUse(fn)) {
-      try { unlinkSync(join(UPLOAD_DIR, fn)); } catch (_) { /* egal */ }
-    }
+    if (fn && !logoInUse(fn)) { try { unlinkSync(join(UPLOAD_DIR, fn)); } catch (_) {} }
   }
   saveState();
   broadcast();
@@ -635,8 +795,6 @@ app.delete('/api/welcome/preset/:id', (req, res) => {
 // ---------------------------------------------------------------------------
 const wss = new WebSocketServer({ server });
 
-// Wand-Clients (echtes /screen) bekommen den Live-Zustand; Steuerung und
-// Vorschau (eingebettetes /screen) bekommen den Entwurf samt `dirty`-Flag.
 function broadcast() {
   const draftMsg = JSON.stringify({ type: 'state', state, dirty: isDirty() });
   const liveMsg = JSON.stringify({ type: 'state', state: live });
@@ -645,24 +803,17 @@ function broadcast() {
   }
 }
 
-// Was läuft gerade auf der echten Wand? (Vom Wand-Heartbeat gemeldet.) Wird an
-// die Steuerung weitergereicht, damit dort das laufende Video + die Playtime
-// angezeigt werden können.
-let liveNowPlaying = null;
+let liveNowPlaying = null; // Was läuft gerade auf der echten Wand?
 
 wss.on('connection', (ws, req) => {
-  // Rolle aus der Query lesen: 'preview'/'control' = Entwurf, sonst = Wand.
   let role = '';
   try { role = new URL(req.url, 'http://x').searchParams.get('role') || ''; } catch (_) {}
   ws.role = role;
   ws.isWall = role !== 'preview' && role !== 'control';
 
-  // Beim Verbinden sofort den passenden Zustand senden.
   ws.send(ws.isWall
     ? JSON.stringify({ type: 'state', state: live })
     : JSON.stringify({ type: 'state', state, dirty: isDirty() }));
-  // Steuerung (Indikator) und Live-Monitor (folgt der Wand) erfahren sofort,
-  // was gerade live läuft.
   if ((ws.role === 'control' || ws.role === 'monitor') && liveNowPlaying) {
     ws.send(JSON.stringify({ type: 'cmd', cmd: 'nowplaying', ...liveNowPlaying }));
   }
@@ -672,10 +823,6 @@ wss.on('connection', (ws, req) => {
     try { msg = JSON.parse(data.toString()); } catch (_) { return; }
     if (!msg || msg.type !== 'cmd') return;
 
-    // "nowplaying": nur die echte Wand ist die Quelle (isWall, aber nicht der
-    // Monitor). Merken und an Steuerung (Indikator) + Live-Monitor (Sync)
-    // weiterreichen – NICHT an die Entwurf-Vorschau. Meldungen anderer Sichten
-    // werden verworfen (kein generisches Relay), damit nichts „zurückspiegelt".
     if (msg.cmd === 'nowplaying') {
       if (ws.isWall && ws.role !== 'monitor') {
         const { type, ...rest } = msg;
@@ -689,9 +836,6 @@ wss.on('connection', (ws, req) => {
       return;
     }
 
-    // Übrige Befehle (z. B. Video-Seek aus der Vorschau) nur an Clients
-    // derselben Sicht weiterreichen, damit sich Entwurf-Vorschau und Live-Wand
-    // nicht gegenseitig steuern. Flüchtig, wird nicht persistiert.
     const out = JSON.stringify(msg);
     for (const client of wss.clients) {
       if (client.isWall === ws.isWall && client.readyState === client.OPEN) client.send(out);

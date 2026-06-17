@@ -10,12 +10,15 @@
   <!-- Verbindungs-Overlay (wird bei WS-Abbruch eingeblendet) -->
   <div id="offline" class="offline hidden">Verbindung verloren – verbinde neu…</div>
 
-  <!-- Modus 1: Diashow (eigene Crossfade-Lösung, keine externe Lib nötig) -->
-  <section id="slideshow" class="layer slideshow hidden"></section>
+  <!-- Inhalts-Bühne: zwei Crossfade-Slots (color/image/video/webpage/screenshare)
+       plus eine persistente YouTube-Schicht (eigener IFrame-Player). -->
+  <div id="stage" class="stage">
+    <div class="layer slot" id="slot-0"></div>
+    <div class="layer slot" id="slot-1"></div>
+    <div class="layer yt-layer" id="yt-layer"><div id="yt-player"></div></div>
+  </div>
 
-  <!-- Willkommens-Overlay: liegt ÜBER der Diashow (Dual-TV-Begrüßungsscreen).
-       Zentrierte Karte mit Blur-Hintergrund, links/rechts je Logo + Text,
-       fester Abstand in der Mitte als Bezel-Schutzzone. -->
+  <!-- Willkommens-Overlay: liegt ÜBER dem Hintergrund (Dual-TV-Begrüßungsscreen). -->
   <div id="welcome" class="welcome-overlay hidden">
     <div class="wc-card">
       <div class="wc-headline" id="wc-headline"></div>
@@ -32,24 +35,6 @@
       </div>
     </div>
   </div>
-
-  <!-- Modus 2: YouTube -->
-  <section id="youtube" class="layer youtube hidden">
-    <div id="yt-player"></div>
-  </section>
-
-  <!-- Modus 3: Link – Webseite(n) im Vollbild -->
-  <section id="link" class="layer link hidden">
-    <iframe id="link-frame" allow="autoplay; fullscreen; encrypted-media"
-      referrerpolicy="no-referrer"></iframe>
-    <!-- Eingeblendet, wenn die Seite die Einbettung verbietet. -->
-    <div id="link-notice" class="link-notice hidden">
-      <div class="link-notice-box">
-        <div class="link-notice-title">Diese Seite erlaubt keine Einbettung</div>
-        <div class="link-notice-url" id="link-notice-url"></div>
-      </div>
-    </div>
-  </section>
 
   <script src="/js/screen.js"></script>
 </body>
