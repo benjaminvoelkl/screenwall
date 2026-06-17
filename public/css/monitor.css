@@ -71,7 +71,7 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
   gap: 22px; padding: 24px 16px;
 }
 .monitor-stage {
-  position: relative; background: #000; border-radius: 10px; overflow: hidden;
+  position: relative; background: #000; overflow: hidden;
   border: 1px solid var(--border);
   box-shadow:
     0 0 0 8px #05060a,
