@@ -1,5 +1,5 @@
-// Screenwall – lokaler Server für Steuerseite (/settings), Live-Monitor (/) und
-// Vollbild-Anzeige (/screen).
+// Screenwall – lokaler Server für Programm-Timeline (/programm), Playlist-Editor
+// (/playlists), Live-Monitor (/) und Vollbild-Anzeige (/screen).
 //
 // Architektur (siehe README):
 //   - Express liefert die Seiten + statische Assets + Uploads aus.
@@ -385,10 +385,16 @@ app.get('/screen', (req, res) => {
   res.set('Cache-Control', 'no-cache');
   res.sendFile(join(PUBLIC_DIR, 'screen.html'));
 });
-app.get('/settings', (req, res) => {
+app.get('/programm', (req, res) => {
   res.set('Cache-Control', 'no-cache');
-  res.sendFile(join(PUBLIC_DIR, 'settings.html'));
+  res.sendFile(join(PUBLIC_DIR, 'programm.html'));
 });
+app.get('/playlists', (req, res) => {
+  res.set('Cache-Control', 'no-cache');
+  res.sendFile(join(PUBLIC_DIR, 'playlists.html'));
+});
+// Abwärtskompatibel: alte Steuerseite leitet auf die Programm-Timeline.
+app.get('/settings', (req, res) => res.redirect('/programm'));
 app.get('/overlay', (req, res) => {
   res.set('Cache-Control', 'no-cache');
   res.sendFile(join(PUBLIC_DIR, 'overlay.html'));

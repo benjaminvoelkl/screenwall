@@ -1,6 +1,6 @@
 // Willkommens-Overlay als eigene Seite (/overlay). Bearbeitet den Entwurf
 // (welcome.*) und zeigt – sobald es Änderungen gibt – einen Go-Live-Button,
-// der zur Programmplanung führt, wo veröffentlicht wird.
+// der zur Programm-Timeline führt, wo veröffentlicht wird.
 
 (() => {
   let state = null;
@@ -40,12 +40,12 @@
   connect();
   fetch('/api/state').then((r) => r.json()).then((s) => { state = s; render(); });
 
-  // Go Live erscheint nur bei Änderungen; führt zur Programmplanung (Veröffentlichen).
+  // Go Live erscheint nur bei Änderungen; führt zur Programm-Timeline (Veröffentlichen).
   function setDirty(dirty) {
     const btn = $('go-live');
     if (btn) btn.classList.toggle('hidden', !dirty);
   }
-  $('go-live').addEventListener('click', () => { location.href = '/settings'; });
+  $('go-live').addEventListener('click', () => { location.href = '/programm'; });
 
   // ---- Overlay-Einstellungen ---------------------------------------------
   $('wc-visible').addEventListener('change', (e) =>

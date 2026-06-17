@@ -1,7 +1,7 @@
-// Steuerseite /settings. Verwaltet PLAYLISTS + CONTENTS über die /api/playlist-
+// Playlist-Editor /playlists. Verwaltet PLAYLISTS + CONTENTS über die /api/playlist-
 // Routen; der Server persistiert und broadcastet. Per WebSocket bleiben mehrere
-// Steuerseiten und alle /screen-Geräte synchron. Änderungen landen im Entwurf;
-// die Wand ändert sich erst per "Preview & Go Live".
+// Editoren und alle /screen-Geräte synchron. Änderungen landen im Entwurf; das
+// Veröffentlichen ("Preview & Go Live") geschieht auf der Programm-Timeline (/programm).
 
 (() => {
   const $ = (id) => document.getElementById(id);
@@ -37,7 +37,6 @@
         const msg = JSON.parse(ev.data);
         if (msg.type === 'state') {
           state = msg.state;
-          if (typeof msg.dirty === 'boolean') setDirty(msg.dirty);
           render();
         } else if (msg.type === 'cmd' && msg.cmd === 'nowplaying') {
           liveNowPlaying = msg;
@@ -54,92 +53,6 @@
   }
   connect();
   fetch('/api/state').then((r) => r.json()).then((s) => { state = s; render(); });
-
-  // ---- Go Live ------------------------------------------------------------
-  function setDirty(dirty) {
-    const live = $('go-live');
-    if (live) {
-      live.classList.toggle('hidden', !dirty);
-      live.classList.toggle('pending', dirty);
-      live.textContent = '● Preview & Go Live';
-    }
-  }
-  $('go-live').addEventListener('click', openGoLive);
-
-  const PREVIEW_W = 4320, PREVIEW_H = 3840; // echte Wandfläche (18:16)
-  function scaleGoliveStage() {
-    const stage = $('golive-stage');
-    const wrap = $('golive-frame-wrap');
-    if (!stage || stage.offsetParent === null) return;
-    const availW = window.innerWidth * 0.9;
-    const availH = window.innerHeight * 0.62;
-    const scale = Math.max(0.01, Math.min(availW / PREVIEW_W, availH / PREVIEW_H));
-    stage.style.width = Math.round(PREVIEW_W * scale) + 'px';
-    stage.style.height = Math.round(PREVIEW_H * scale) + 'px';
-    wrap.style.transform = `scale(${scale})`;
-  }
-  function openGoLive() {
-    $('golive-frame').src = '/screen'; // Entwurf
-    $('golive-modal').classList.remove('hidden');
-    resetSlide();
-    scaleGoliveStage();
-    requestAnimationFrame(scaleGoliveStage);
-  }
-  function closeGoLive() {
-    $('golive-modal').classList.add('hidden');
-    $('golive-frame').src = '';
-    resetSlide();
-  }
-  $('golive-cancel').addEventListener('click', closeGoLive);
-  $('golive-modal').addEventListener('click', (e) => { if (e.target === $('golive-modal')) closeGoLive(); });
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !$('golive-modal').classList.contains('hidden')) closeGoLive();
-  });
-
-  // ---- Slide-to-go-live ---------------------------------------------------
-  let slideX = 0, sliding = false, slideDone = false;
-  function slideTravel() { return $('golive-slider').clientWidth - $('slide-handle').offsetWidth - 8; }
-  function setSlide(x) {
-    const max = slideTravel();
-    slideX = Math.max(0, Math.min(max, x));
-    $('slide-handle').style.transform = `translateX(${slideX}px)`;
-    $('slide-fill').style.width = `${slideX + $('slide-handle').offsetWidth}px`;
-  }
-  function resetSlide() {
-    slideDone = false; sliding = false;
-    $('slide-handle').style.transition = '';
-    setSlide(0);
-  }
-  async function fireGoLive() {
-    if (slideDone) return;
-    slideDone = true;
-    setSlide(slideTravel());
-    try { await fetch('/api/golive', { method: 'POST' }); } catch (_) {}
-    location.href = '/'; // zurück zum Live-Monitor
-  }
-  (function bindSlide() {
-    const handle = $('slide-handle');
-    let startX = 0, startSlide = 0;
-    handle.addEventListener('pointerdown', (e) => {
-      if (slideDone) return;
-      sliding = true; startX = e.clientX; startSlide = slideX;
-      handle.style.transition = 'none';
-      handle.setPointerCapture(e.pointerId);
-    });
-    handle.addEventListener('pointermove', (e) => { if (sliding) setSlide(startSlide + (e.clientX - startX)); });
-    const end = () => {
-      if (!sliding) return;
-      sliding = false;
-      handle.style.transition = 'transform 0.2s ease';
-      if (slideX >= slideTravel() * 0.95) fireGoLive();
-      else setSlide(0);
-    };
-    handle.addEventListener('pointerup', end);
-    handle.addEventListener('pointercancel', end);
-  })();
-  window.addEventListener('resize', () => {
-    if (!$('golive-modal').classList.contains('hidden')) { scaleGoliveStage(); if (!sliding) setSlide(slideDone ? slideTravel() : 0); }
-  });
 
   // ===== Playlist-Verwaltung ==============================================
   $('pl-select').addEventListener('change', (e) => { selectedId = e.target.value; render(); });

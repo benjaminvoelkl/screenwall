@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Screenwall – Programm</title>
+  <link rel="stylesheet" href="/css/control.css" />
+  <link rel="stylesheet" href="/css/programm.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-title">
+      <a class="back-link" href="/" title="Zum Live-Monitor">← Live-Monitor</a>
+      <h1>Programm</h1>
+    </div>
+    <div class="topbar-actions">
+      <a class="back-link" href="/playlists" title="Playlists zusammenstellen">Playlists bearbeiten ↗</a>
+      <button id="go-live" class="go-live hidden" title="Entwurf ansehen und auf die Wand veröffentlichen">
+        Preview &amp; Go Live
+      </button>
+    </div>
+  </header>
+
+  <main class="programm-main">
+    <!-- Live-Vorschau des Entwurfs (folgt dem Playhead beim Scrubben) -->
+    <section class="prog-preview">
+      <div class="preview-head">
+        <span>Live-Vorschau (Entwurf) – am Zeitstrahl scrubben</span>
+        <span id="prog-clock" class="prog-clock">0:00 / 0:00</span>
+      </div>
+      <div id="prev-stage" class="preview-stage">
+        <div id="prev-frame-wrap" class="preview-frame-wrap">
+          <iframe id="prev-frame" title="Programm-Vorschau"
+                  allow="autoplay; encrypted-media; fullscreen; picture-in-picture"></iframe>
+        </div>
+      </div>
+    </section>
+
+    <!-- Zeitstrahl mit parallelen Spuren -->
+    <section class="timeline">
+      <div class="tl-toolbar">
+        <span class="tl-title" id="tl-title">Programm</span>
+        <span id="tl-total">Gesamt: 0:00</span>
+        <span class="tl-zoom">Zoom
+          <input type="range" id="tl-zoom" min="3" max="48" step="1" value="12" />
+        </span>
+        <span class="hint" style="margin:0">Spur anklicken/ziehen = scrubben.</span>
+      </div>
+
+      <div id="tl-grid" class="tl-grid">
+        <div class="tl-gutter">
+          <div class="tl-gutter-ruler"></div>
+          <div class="tl-gutter-label"><span class="ic">🎬</span> Content</div>
+          <div class="tl-gutter-label"><span class="ic">🎵</span> Musik</div>
+          <div class="tl-gutter-label"><span class="ic">✦</span> Overlay</div>
+        </div>
+        <div class="tl-scroll" id="tl-scroll">
+          <div class="tl-tracks" id="tl-tracks">
+            <div class="tl-ruler" id="tl-ruler"></div>
+            <div class="tl-lane" id="lane-content"></div>
+            <div class="tl-lane empty" id="lane-music">Musik – folgt</div>
+            <div class="tl-lane" id="lane-overlay"></div>
+            <div class="tl-playhead" id="tl-playhead"></div>
+          </div>
+        </div>
+      </div>
+      <p id="prog-empty" class="prog-empty hidden">
+        Noch kein Programm. Lege Inhalte unter <a href="/playlists">Playlists</a> an.
+      </p>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span class="status">
+      <span id="conn-dot" class="dot"></span>
+      <span id="conn-text">verbinde…</span>
+    </span>
+    <span class="vol" title="Lautstärke der Wand (System)">
+      <button id="vol-mute" class="vol-icon" title="Stummschalten">🔊</button>
+      <input type="range" id="vol-range" min="0" max="100" step="1" value="50" />
+      <span id="vol-val" class="vol-val">–</span>
+    </span>
+    <a class="screen-link" href="/screen" target="_blank">/screen öffnen ↗</a>
+  </footer>
+
+  <!-- Go-Live-Bestätigung: Vorschau des Entwurfs ab Playhead + Slide-to-go-live -->
+  <div id="golive-modal" class="modal hidden">
+    <div class="preview-box golive-box">
+      <div class="preview-head">
+        <span>Live gehen? – Vorschau startet ab dem Playhead-Punkt</span>
+        <button id="golive-cancel" class="btn ghost">Abbrechen</button>
+      </div>
+      <div id="golive-stage" class="preview-stage">
+        <div id="golive-frame-wrap" class="preview-frame-wrap">
+          <iframe id="golive-frame" title="Go-Live-Vorschau"
+                  allow="autoplay; encrypted-media; fullscreen; picture-in-picture"></iframe>
+        </div>
+      </div>
+      <div id="golive-slider" class="slide-confirm">
+        <div class="slide-fill" id="slide-fill"></div>
+        <span class="slide-label">Zum Live-Gehen schieben →</span>
+        <div class="slide-handle" id="slide-handle">▶</div>
+      </div>
+    </div>
+  </div>
+
+  <a class="overlay-fab" href="/overlay" title="Willkommens-Overlay bearbeiten">Overlay</a>
+
+  <script src="/js/programm.js"></script>
+</body>
+</html>

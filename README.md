@@ -4,12 +4,15 @@ Lokale Web-Anwendung zur Steuerung eines Anzeige-Bildschirms (Beamer/Monitor) vo
 einem beliebigen Gerät im selben Netzwerk (Tablet, Handy, Laptop).
 
 - **`/`** – Live-Monitor: spiegelt maßstabsgetreu, was gerade auf der Wand läuft.
-- **`/settings`** – Programmplanung: Playlists und Inhalte konfigurieren.
+- **`/programm`** – Programm-Timeline: Übersicht des Programms wie in einem Videoschnitt-
+  Programm (Zeitstrahl, Scrubbing, Spuren für Content/Musik/Overlay) + „Preview & Go Live".
+- **`/playlists`** – Playlist-Editor: Playlists und Inhalte zusammenstellen/konfigurieren.
 - **`/screen`** – Vollbild-Anzeige (Beamer/Wand): zeigt die veröffentlichte Übertragung.
 - **`/overlay`** – Willkommens-Overlay konfigurieren (liegt über dem Hintergrund).
 
-Änderungen auf `/settings` landen zunächst im **Entwurf** und erscheinen erst per
-**„Preview & Go Live"** auf der Wand. Updates laufen **ohne Neuladen** per WebSocket.
+Änderungen auf `/playlists` landen zunächst im **Entwurf** und erscheinen erst per
+**„Preview & Go Live"** (auf `/programm`) auf der Wand. Updates laufen **ohne Neuladen**
+per WebSocket. (`/settings` leitet aus Kompatibilität auf `/programm` um.)
 
 ## Playlists & Contents
 
@@ -103,11 +106,12 @@ live.json              veröffentlichter Wand-Zustand
 uploads/               hochgeladene Bilder/Videos
 public/
   index.html           Live-Monitor /
-  settings.html        Programmplanung /settings (Playlist-Editor)
+  programm.html        Programm-Timeline /programm (Übersicht + Go Live)
+  playlists.html       Playlist-Editor /playlists (Inhalte zusammenstellen)
   screen.html          Anzeige /screen
   overlay.html         Willkommens-Overlay /overlay
-  css/control.css  css/monitor.css  css/screen.css
-  js/control.js    js/monitor.js    js/screen.js    js/overlay.js
+  css/control.css  css/programm.css  css/monitor.css  css/screen.css
+  js/programm.js   js/playlists.js   js/monitor.js    js/screen.js    js/overlay.js
 ```
 
 ## API (intern)

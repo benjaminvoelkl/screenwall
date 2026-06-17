@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Screenwall – Programmplanung</title>
+  <title>Screenwall – Playlists</title>
   <!-- Cropper.js für optionalen 18:16-Zuschnitt (CDN). -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.css" />
   <link rel="stylesheet" href="/css/control.css" />
@@ -11,13 +11,11 @@
 <body>
   <header class="topbar">
     <div class="topbar-title">
-      <a class="back-link" href="/" title="Zum Live-Monitor">← Live-Monitor</a>
-      <h1>Programmplanung</h1>
+      <a class="back-link" href="/programm" title="Zur Programm-Timeline">← Programm</a>
+      <h1>Playlists</h1>
     </div>
     <div class="topbar-actions">
-      <button id="go-live" class="go-live hidden" title="Entwurf ansehen und auf die Wand veröffentlichen">
-        Preview &amp; Go Live
-      </button>
+      <a class="back-link" href="/programm" title="Zur Programm-Timeline">Timeline &amp; Go Live →</a>
     </div>
   </header>
 
@@ -93,28 +91,6 @@
     <a class="screen-link" href="/screen" target="_blank">/screen öffnen ↗</a>
   </footer>
 
-  <!-- Go-Live-Bestätigung: Vorschau des Entwurfs + Slide-to-go-live -->
-  <div id="golive-modal" class="modal hidden">
-    <div class="preview-box golive-box">
-      <div class="preview-head">
-        <span>Live gehen? – so sieht der Inhalt auf der Wand aus</span>
-        <button id="golive-cancel" class="btn ghost">Abbrechen</button>
-      </div>
-      <div id="golive-stage" class="preview-stage">
-        <div id="golive-frame-wrap" class="preview-frame-wrap">
-          <iframe id="golive-frame" title="Go-Live-Vorschau"
-                  allow="autoplay; encrypted-media; fullscreen; picture-in-picture"></iframe>
-        </div>
-      </div>
-      <!-- Slide-to-confirm -->
-      <div id="golive-slider" class="slide-confirm">
-        <div class="slide-fill" id="slide-fill"></div>
-        <span class="slide-label">Zum Live-Gehen schieben →</span>
-        <div class="slide-handle" id="slide-handle">▶</div>
-      </div>
-    </div>
-  </div>
-
   <!-- Crop-Dialog -->
   <div id="crop-modal" class="modal hidden">
     <div class="modal-box">
@@ -131,6 +107,6 @@
   <a class="overlay-fab" href="/overlay" title="Willkommens-Overlay bearbeiten">Overlay</a>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.js"></script>
-  <script src="/js/control.js"></script>
+  <script src="/js/playlists.js"></script>
 </body>
 </html>

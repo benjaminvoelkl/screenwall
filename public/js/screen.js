@@ -56,6 +56,7 @@
         const msg = JSON.parse(ev.data);
         if (msg.type === 'state') applyState(msg.state);
         else if (msg.type === 'cmd' && msg.cmd === 'seek') seekCurrent(msg.time);
+        else if (msg.type === 'cmd' && msg.cmd === 'goto') gotoEntry(msg.itemId, msg.time);
         else if (msg.type === 'cmd' && msg.cmd === 'nowplaying') { if (viewer === 'monitor') applyNowPlaying(msg); }
         else if (msg.type === 'cmd' && msg.cmd === 'sync-request') { if (viewer === 'wall') sendNowPlaying(); }
       } catch (_) { /* ignorieren */ }
@@ -385,6 +386,18 @@
     if (embedded && ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'cmd', cmd: 'sync-request' }));
     }
+  }
+
+  // Springt zu einem Content der ausgeflachten Sequenz (per itemId) und startet ihn
+  // ab `time` Sekunden. Wird von der Programm-Timeline (/programm) beim Scrubbing
+  // genutzt: setzt die Vorschau auf den Playhead-Punkt. In der Vorschau läuft danach
+  // der Auto-Advance regulär weiter. No-op bei unbekannter itemId.
+  function gotoEntry(itemId, time) {
+    if (!itemId) return;
+    const i = seq.findIndex((e) => e.itemId === itemId);
+    if (i === -1) return;
+    idx = i;
+    showContent(seq[i], { startSeconds: Math.max(0, time || 0) });
   }
 
   function seekCurrent(time) {
