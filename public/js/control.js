@@ -4,6 +4,7 @@
 
 (() => {
   let state = null;
+  let liveNowPlaying = null; // Was läuft gerade auf der Wand (live)?
 
   // ---- Helper -------------------------------------------------------------
   const $ = (id) => document.getElementById(id);
@@ -38,6 +39,10 @@
           state = msg.state;
           if (typeof msg.dirty === 'boolean') setDirty(msg.dirty);
           render();
+        } else if (msg.type === 'cmd' && msg.cmd === 'nowplaying') {
+          // Was läuft gerade auf der echten Wand (live)? -> Playing-Indikator.
+          liveNowPlaying = msg;
+          applyYtNowPlaying();
         }
       } catch (_) {}
     });
@@ -364,6 +369,50 @@
   $('yt-crop').addEventListener('change', (e) =>
     postState({ youtube: { crop: e.target.checked } }));
 
+  // Aktuell ausgewählte (= auf /screen aktive) YouTube-Sequenz.
+  function activeYtSeq() {
+    return state.youtube.sequences.find((s) => s.id === state.youtube.activeSequenceId)
+      || state.youtube.sequences[0];
+  }
+  // YouTube-Sequenzen werden – anders als die Diashow (Dateien) – komplett über
+  // den State-Patch verwaltet; es gibt keine Dateien aufzuräumen.
+  function patchYtSequences(sequences, activeSequenceId) {
+    const patch = { sequences };
+    if (activeSequenceId) patch.activeSequenceId = activeSequenceId;
+    postState({ youtube: patch });
+  }
+
+  $('yt-seq-select').addEventListener('change', (e) =>
+    postState({ youtube: { activeSequenceId: e.target.value } }));
+
+  $('yt-seq-new').addEventListener('click', () => {
+    const name = prompt('Name der neuen Sequenz:', `Sequenz ${state.youtube.sequences.length + 1}`);
+    if (name === null) return;
+    const seq = { id: cryptoId(), name: name.trim() || `Sequenz ${state.youtube.sequences.length + 1}`, videos: [] };
+    patchYtSequences([...state.youtube.sequences, seq], seq.id);
+  });
+
+  $('yt-seq-rename').addEventListener('click', () => {
+    const seq = activeYtSeq();
+    if (!seq) return;
+    const name = prompt('Neuer Name:', seq.name);
+    if (name === null || !name.trim()) return;
+    patchYtSequences(state.youtube.sequences.map((s) =>
+      s.id === seq.id ? { ...s, name: name.trim() } : s));
+  });
+
+  $('yt-seq-delete').addEventListener('click', () => {
+    const seq = activeYtSeq();
+    if (!seq) return;
+    if (state.youtube.sequences.length <= 1) {
+      alert('Mindestens eine Sequenz muss bestehen bleiben.');
+      return;
+    }
+    if (!confirm(`Sequenz „${seq.name}" mit allen Videos löschen?`)) return;
+    const rest = state.youtube.sequences.filter((s) => s.id !== seq.id);
+    patchYtSequences(rest, rest[0].id);
+  });
+
   $('yt-add').addEventListener('click', addYoutube);
   $('yt-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') addYoutube(); });
 
@@ -372,9 +421,11 @@
     if (!raw) return;
     const id = parseYoutubeId(raw);
     if (!id) { alert('Konnte keine YouTube-ID erkennen.'); return; }
-    const videos = [...state.youtube.videos, { id: cryptoId(), videoId: id, title: raw }];
+    const seq = activeYtSeq();
+    const video = { id: cryptoId(), videoId: id, title: raw };
     $('yt-input').value = '';
-    postState({ youtube: { videos } });
+    patchYtSequences(state.youtube.sequences.map((s) =>
+      s.id === seq.id ? { ...s, videos: [...s.videos, video] } : s));
   }
 
   function parseYoutubeId(input) {
@@ -393,29 +444,72 @@
   function renderYoutubeList() {
     const ul = $('yt-list');
     ul.innerHTML = '';
-    for (const v of state.youtube.videos) {
+    const seq = activeYtSeq();
+    for (const v of (seq ? seq.videos : [])) {
+      const url = `https://www.youtube.com/watch?v=${v.videoId}`;
       const li = document.createElement('li');
       li.className = 'media-item';
       li.draggable = true;
       li.dataset.id = v.id;
+      li.dataset.videoId = v.videoId;
+      // Name verlinkt auf das Original-Video; darunter die anklickbare URL.
       li.innerHTML = `
         <span class="drag">⠿</span>
-        <img class="thumb" src="https://i.ytimg.com/vi/${v.videoId}/default.jpg" alt="" />
+        <a class="thumb-link" href="${url}" target="_blank" rel="noopener" title="Auf YouTube öffnen">
+          <img class="thumb" src="https://i.ytimg.com/vi/${v.videoId}/default.jpg" alt="" />
+        </a>
         <span class="meta">
           <div class="name">${escapeHtml(v.title || v.videoId)}</div>
-          <div class="type">${v.videoId}</div>
+          <a class="yt-url" href="${url}" target="_blank" rel="noopener">${url}</a>
+          <div class="yt-now hidden">
+            <span class="yt-badge">▶ läuft</span>
+            <div class="yt-progress"><div class="yt-progress-bar"></div></div>
+            <span class="yt-time">–</span>
+          </div>
         </span>
         <button class="del" title="Entfernen">🗑</button>`;
       li.querySelector('.del').addEventListener('click', () => {
-        postState({ youtube: { videos: state.youtube.videos.filter((x) => x.id !== v.id) } });
+        patchYtSequences(state.youtube.sequences.map((s) =>
+          s.id === seq.id ? { ...s, videos: s.videos.filter((x) => x.id !== v.id) } : s));
       });
       ul.appendChild(li);
     }
     enableDragReorder(ul, () => {
       const order = Array.from(ul.children).map((c) => c.dataset.id);
-      const byId = new Map(state.youtube.videos.map((x) => [x.id, x]));
-      postState({ youtube: { videos: order.map((id) => byId.get(id)).filter(Boolean) } });
+      const byId = new Map(seq.videos.map((x) => [x.id, x]));
+      patchYtSequences(state.youtube.sequences.map((s) =>
+        s.id === seq.id ? { ...s, videos: order.map((id) => byId.get(id)).filter(Boolean) } : s));
     });
+    applyYtNowPlaying();
+  }
+
+  // Markiert das gerade auf der Wand laufende Video und zeigt die Playtime.
+  // Spiegelt den Live-Zustand (nicht den Entwurf) wider.
+  function fmtClock(s) {
+    s = Math.max(0, Math.floor(s || 0));
+    const m = Math.floor(s / 60);
+    return `${m}:${String(s % 60).padStart(2, '0')}`;
+  }
+  function applyYtNowPlaying() {
+    const ul = $('yt-list');
+    if (!ul) return;
+    const np = liveNowPlaying;
+    const live = np && np.mode === 'youtube' ? np : null;
+    for (const li of ul.children) {
+      const match = live && (li.dataset.id === live.id || li.dataset.videoId === live.videoId);
+      li.classList.toggle('playing', !!match);
+      const now = li.querySelector('.yt-now');
+      if (!now) continue;
+      now.classList.toggle('hidden', !match);
+      if (match) {
+        const dur = live.duration || 0;
+        const t = live.time || 0;
+        const pct = dur > 0 ? Math.min(100, (t / dur) * 100) : 0;
+        now.querySelector('.yt-progress-bar').style.width = `${pct}%`;
+        now.querySelector('.yt-time').textContent =
+          dur > 0 ? `${fmtClock(t)} / ${fmtClock(dur)}` : fmtClock(t);
+      }
+    }
   }
 
   // ===== Modus 3: Link ====================================================
@@ -673,6 +767,17 @@
     renderSlideshowList();
 
     // YouTube
+    const ytSel = $('yt-seq-select');
+    if (document.activeElement !== ytSel) {
+      ytSel.innerHTML = '';
+      for (const s of state.youtube.sequences) {
+        const opt = document.createElement('option');
+        opt.value = s.id;
+        opt.textContent = `${s.name} (${s.videos.length})`;
+        ytSel.appendChild(opt);
+      }
+      ytSel.value = state.youtube.activeSequenceId;
+    }
     setIfNotFocused($('yt-muted'), state.youtube.muted);
     setIfNotFocused($('yt-crop'), state.youtube.crop);
     renderYoutubeList();

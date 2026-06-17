@@ -61,7 +61,11 @@ const DEFAULT_STATE = {
   youtube: {
     muted: true, // Browser erlauben Autoplay meist nur stummgeschaltet.
     crop: false, // true = Video formatfüllend zuschneiden (Cover) statt Balken.
-    videos: [] // [{ id, videoId, title }]
+    // Wie die Diashow: mehrere benannte Sequenzen, die aktive läuft auf /screen.
+    activeSequenceId: 'yt-default',
+    sequences: [
+      { id: 'yt-default', name: 'Sequenz 1', videos: [] } // videos: [{ id, videoId, title }]
+    ]
   },
   // Modus „Link": Webseiten werden nacheinander im Vollbild (iframe) gezeigt.
   link: {
@@ -97,6 +101,7 @@ function prepareState(loaded) {
     welcome: { ...DEFAULT_STATE.welcome, ...(loaded.welcome || {}) }
   };
   merged.slideshow = normalizeSlideshow(merged.slideshow);
+  merged.youtube = normalizeYoutube(merged.youtube);
   merged.welcome = normalizeWelcome(merged.welcome);
   if (merged.mode === 'welcome') merged.mode = 'slideshow'; // alter Modus entfällt
   return merged;
@@ -144,6 +149,25 @@ function normalizeSlideshow(ss) {
   }
   delete ss.media; // altes Single-Listen-Feld entfernen
   return ss;
+}
+
+// Stellt sicher, dass youtube das Sequenz-Modell hat. Migriert alte state.json-
+// Dateien, die noch eine einzelne `videos`-Liste hatten, in die erste Sequenz.
+function normalizeYoutube(yt) {
+  yt = yt || {};
+  if (!Array.isArray(yt.sequences) || yt.sequences.length === 0) {
+    yt.sequences = [{ id: 'yt-default', name: 'Sequenz 1', videos: [] }];
+  }
+  for (const seq of yt.sequences) if (!Array.isArray(seq.videos)) seq.videos = [];
+  // Altes flaches `videos`-Feld übernehmen, falls die Sequenzen noch leer sind.
+  if (Array.isArray(yt.videos) && yt.videos.length) {
+    if (!yt.sequences.some((s) => s.videos.length)) yt.sequences[0].videos = yt.videos;
+  }
+  delete yt.videos;
+  if (!yt.activeSequenceId || !yt.sequences.some((s) => s.id === yt.activeSequenceId)) {
+    yt.activeSequenceId = yt.sequences[0].id;
+  }
+  return yt;
 }
 
 // Stellt das Willkommens-Overlay-Modell sicher und migriert alte state.json-
@@ -611,24 +635,48 @@ function broadcast() {
   }
 }
 
+// Was läuft gerade auf der echten Wand? (Vom Wand-Heartbeat gemeldet.) Wird an
+// die Steuerung weitergereicht, damit dort das laufende Video + die Playtime
+// angezeigt werden können.
+let liveNowPlaying = null;
+
 wss.on('connection', (ws, req) => {
   // Rolle aus der Query lesen: 'preview'/'control' = Entwurf, sonst = Wand.
   let role = '';
   try { role = new URL(req.url, 'http://x').searchParams.get('role') || ''; } catch (_) {}
+  ws.role = role;
   ws.isWall = role !== 'preview' && role !== 'control';
 
   // Beim Verbinden sofort den passenden Zustand senden.
   ws.send(ws.isWall
     ? JSON.stringify({ type: 'state', state: live })
     : JSON.stringify({ type: 'state', state, dirty: isDirty() }));
+  // Steuerung erfährt sofort, was gerade live läuft (für den Playing-Indikator).
+  if (ws.role === 'control' && liveNowPlaying) {
+    ws.send(JSON.stringify({ type: 'cmd', cmd: 'nowplaying', ...liveNowPlaying }));
+  }
 
-  // Befehle (z. B. Video-Seek aus der Vorschau) weiterreichen – aber nur an
-  // Clients derselben Sicht, damit Entwurf-Vorschau und Live-Wand sich nicht
-  // gegenseitig steuern. Flüchtig, wird nicht persistiert.
   ws.on('message', (data) => {
     let msg;
     try { msg = JSON.parse(data.toString()); } catch (_) { return; }
     if (!msg || msg.type !== 'cmd') return;
+
+    // "nowplaying" der Wand: merken und an die Steuerung weiterreichen, damit
+    // diese das laufende Video markieren kann (die Vorschau zeigt den Entwurf
+    // und soll der Wand nicht folgen – daher NICHT an preview).
+    if (msg.cmd === 'nowplaying' && ws.isWall) {
+      const { type, ...rest } = msg;
+      liveNowPlaying = rest;
+      const out = JSON.stringify(msg);
+      for (const client of wss.clients) {
+        if (client.role === 'control' && client.readyState === client.OPEN) client.send(out);
+      }
+      return;
+    }
+
+    // Übrige Befehle (z. B. Video-Seek aus der Vorschau) nur an Clients
+    // derselben Sicht weiterreichen, damit sich Entwurf-Vorschau und Live-Wand
+    // nicht gegenseitig steuern. Flüchtig, wird nicht persistiert.
     const out = JSON.stringify(msg);
     for (const client of wss.clients) {
       if (client.isWall === ws.isWall && client.readyState === client.OPEN) client.send(out);

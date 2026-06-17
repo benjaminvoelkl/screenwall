@@ -332,9 +332,13 @@
     function keyOf(v) { return v.map((x) => x.videoId).join('|'); }
 
     function update(s, _prev, justEntered) {
-      videos = s.videos || [];
       muted = s.muted !== false;
-      const newKey = keyOf(videos);
+      // Aktive Sequenz auswählen (wie die Diashow); deren Videos werden gespielt.
+      const seq = (s.sequences || []).find((x) => x.id === s.activeSequenceId)
+        || (s.sequences || [])[0];
+      videos = seq ? seq.videos : [];
+      // Sequenzwechsel zählt als Änderung -> Neustart der Wiedergabe.
+      const newKey = (s.activeSequenceId || '') + '::' + keyOf(videos);
       const restart = newKey !== videoKey || justEntered || !started;
       videoKey = newKey;
       if (!ready) { pendingApply = [restart]; return; }
@@ -388,12 +392,15 @@
       return null;
     }
 
-    // Welches Video läuft gerade an welcher Stelle? (für den Wand-Heartbeat)
+    // Welches Video läuft gerade an welcher Stelle? (für den Wand-Heartbeat und
+    // den Playing-Indikator/Playtime in der Steuerung)
     function nowPlaying() {
       if (!ready || !player || !videos[idx]) return null;
-      let time = 0;
+      let time = 0, duration = 0;
       try { time = player.getCurrentTime ? player.getCurrentTime() : 0; } catch (_) {}
-      return { videoId: videos[idx].videoId, time };
+      try { duration = player.getDuration ? player.getDuration() : 0; } catch (_) {}
+      const v = videos[idx];
+      return { videoId: v.videoId, id: v.id, time, duration };
     }
 
     // Auf das Video + die Position der Wand springen (nur in der Vorschau).
@@ -497,7 +504,9 @@
     let np = null;
     if (mode === 'youtube') np = YT.nowPlaying();
     else if (mode === 'slideshow') np = Slideshow.nowPlaying();
-    if (np) ws.send(JSON.stringify({ type: 'cmd', cmd: 'nowplaying', mode, ...np }));
+    // Immer mit aktuellem Modus melden, damit die Steuerung den Playing-Indikator
+    // löschen kann, wenn die Wand gerade kein YouTube zeigt.
+    ws.send(JSON.stringify({ type: 'cmd', cmd: 'nowplaying', mode, ...(np || {}) }));
   }
   // Die Vorschau springt auf die gemeldete Position der Wand.
   function applyNowPlaying(np) {

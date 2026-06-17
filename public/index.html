@@ -75,6 +75,17 @@
     <!-- ===== Modus 2: YouTube ===== -->
     <section class="panel" id="panel-youtube">
       <h2>YouTube-Playlist</h2>
+
+      <div class="seq-bar">
+        <label>Sequenz
+          <select id="yt-seq-select"></select>
+        </label>
+        <button id="yt-seq-new" class="btn">+ Neue Sequenz</button>
+        <button id="yt-seq-rename" class="btn ghost">Umbenennen</button>
+        <button id="yt-seq-delete" class="btn ghost">Löschen</button>
+      </div>
+      <p class="hint">Die gewählte Sequenz wird auf <code>/screen</code> abgespielt und hier bearbeitet.</p>
+
       <div class="row">
         <label class="grow">YouTube-Link oder Video-ID hinzufügen
           <input type="text" id="yt-input" placeholder="https://youtu.be/… oder Video-ID" />
