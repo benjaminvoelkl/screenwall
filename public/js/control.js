@@ -28,12 +28,17 @@
   let ws = null;
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    ws = new WebSocket(`${proto}://${location.host}`);
+    // Rolle 'control' -> Server liefert den Entwurf (nicht den Live-Zustand).
+    ws = new WebSocket(`${proto}://${location.host}/?role=control`);
     ws.addEventListener('open', () => setConn(true));
     ws.addEventListener('message', (ev) => {
       try {
         const msg = JSON.parse(ev.data);
-        if (msg.type === 'state') { state = msg.state; render(); }
+        if (msg.type === 'state') {
+          state = msg.state;
+          if (typeof msg.dirty === 'boolean') setDirty(msg.dirty);
+          render();
+        }
       } catch (_) {}
     });
     ws.addEventListener('close', () => { setConn(false); setTimeout(connect, 1500); });
@@ -47,8 +52,37 @@
   fetch('/api/state').then((r) => r.json()).then((s) => { state = s; render(); });
 
   // ---- Modus-Umschaltung --------------------------------------------------
+  // Änderungen landen nur im Entwurf; die Wand ändert sich erst bei "Go Live".
   document.querySelectorAll('.mode-btn').forEach((btn) => {
     btn.addEventListener('click', () => postState({ mode: btn.dataset.mode }));
+  });
+
+  // ---- Go Live: Entwurf veröffentlichen -----------------------------------
+  // Solange unveröffentlichte Änderungen bestehen (dirty), leuchtet der Button.
+  function setDirty(dirty) {
+    const btn = $('go-live');
+    if (!btn) return;
+    btn.classList.toggle('pending', dirty);
+    btn.disabled = !dirty;
+    btn.textContent = dirty ? '● Go Live' : 'Live';
+  }
+  $('go-live').addEventListener('click', async () => {
+    const btn = $('go-live');
+    btn.disabled = true;
+    try { await fetch('/api/golive', { method: 'POST' }); }
+    catch (_) { /* WS-Broadcast aktualisiert den Zustand ohnehin */ }
+  });
+
+  // ---- Willkommens-Overlay: Modal öffnen/schließen ------------------------
+  function openWelcome() { $('welcome-modal').classList.remove('hidden'); }
+  function closeWelcome() { $('welcome-modal').classList.add('hidden'); }
+  $('welcome-open').addEventListener('click', openWelcome);
+  $('welcome-close').addEventListener('click', closeWelcome);
+  $('welcome-modal').addEventListener('click', (e) => {
+    if (e.target === $('welcome-modal')) closeWelcome(); // Klick auf Backdrop
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !$('welcome-modal').classList.contains('hidden')) closeWelcome();
   });
 
   // ===== Modus 1: Diashow =================================================

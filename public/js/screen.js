@@ -31,7 +31,8 @@
 
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    ws = new WebSocket(`${proto}://${location.host}`);
+    // Eingebettet = Vorschau -> Entwurf; sonst echte Wand -> Live-Zustand.
+    ws = new WebSocket(`${proto}://${location.host}/${embedded ? '?role=preview' : ''}`);
 
     ws.addEventListener('open', () => {
       els.offline.classList.add('hidden');
@@ -65,7 +66,9 @@
   connect();
 
   // Fallback: aktuellen Zustand auch per HTTP holen (falls WS verzögert).
-  fetch('/api/state').then((r) => r.json()).then(applyState).catch(() => {});
+  // Wand holt den Live-Zustand, die Vorschau den Entwurf.
+  fetch('/api/state' + (embedded ? '' : '?view=live'))
+    .then((r) => r.json()).then(applyState).catch(() => {});
 
   // ---- Zustand anwenden ---------------------------------------------------
   function applyState(state) {

@@ -58,6 +58,41 @@ html, body {
 }
 @media (prefers-reduced-motion: reduce) { .onair-dot { animation: none; } }
 
+/* Kopfzeilen-Aktionen */
+.topbar-actions { display: flex; align-items: center; gap: 10px; }
+
+/* "Go Live": veröffentlicht den Entwurf auf die Wand. Leuchtet bei
+   unveröffentlichten Änderungen (pending), sonst neutral/deaktiviert. */
+.go-live {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 9px 18px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--panel-2);
+  color: var(--muted); font-size: 14px; font-weight: 700;
+  letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s;
+}
+.go-live:disabled { cursor: default; opacity: 0.85; }
+.go-live.pending {
+  background: #1f7a34; border-color: #2ea043; color: #fff; opacity: 1;
+  box-shadow: 0 0 0 0 rgba(46, 160, 67, 0.7);
+  animation: golive-pulse 1.6s ease-out infinite;
+}
+.go-live.pending:hover { background: #248239; }
+@keyframes golive-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(46, 160, 67, 0.6); }
+  70%  { box-shadow: 0 0 0 10px rgba(46, 160, 67, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(46, 160, 67, 0); }
+}
+@media (prefers-reduced-motion: reduce) { .go-live.pending { animation: none; } }
+
+/* Willkommens-Overlay-Modal: scrollbare Box für die längere Einrichtung. */
+.wc-modal-box { width: min(820px, 94vw); max-height: 90vh; overflow-y: auto; }
+.wc-modal-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-bottom: 4px;
+}
+.wc-modal-head h3 { margin: 0; }
+
 /* Footer: Verbindungsstatus + Lautstärke + /screen-Link */
 .footer {
   display: flex; align-items: center; justify-content: space-between; gap: 16px;
@@ -183,18 +218,9 @@ textarea { resize: vertical; }
 .link-bad { color: var(--danger); }
 .link-unknown { color: var(--muted); }
 
-/* Willkommens-Overlay: eigenständige, immer sichtbare Sektion (über jedem Modus) */
-.wc-section {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 20px;
-  margin-bottom: 18px;
-}
-.wc-section h2 { margin: 0 0 4px; font-size: 18px; }
+/* Willkommens-Overlay: Inhalt im Modal (über Kopfzeilen-Button geöffnet). */
 .wc-section-inner { margin-top: 14px; }
-.wc-section h3 { margin: 0 0 14px; font-size: 16px; }
-.wc-section h4 { margin: 0 0 10px; font-size: 14px; color: var(--muted); }
+.wc-side-edit h4 { margin: 0 0 10px; font-size: 14px; color: var(--muted); }
 .wc-side-edit {
   flex: 1 1 280px;
   background: var(--panel-2);

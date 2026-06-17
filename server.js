@@ -25,7 +25,8 @@ const PORT = process.env.PORT || 3000;
 // An 0.0.0.0 binden, damit der Server im gesamten LAN erreichbar ist (nicht nur localhost).
 const HOST = '0.0.0.0';
 
-const STATE_FILE = join(__dirname, 'state.json');
+const STATE_FILE = join(__dirname, 'state.json'); // Entwurf (von der Steuerung bearbeitet)
+const LIVE_FILE = join(__dirname, 'live.json'); // Veröffentlichter Zustand (Wand/​/screen)
 const UPLOAD_DIR = join(__dirname, 'uploads');
 const PUBLIC_DIR = join(__dirname, 'public');
 
@@ -84,29 +85,45 @@ const DEFAULT_STATE = {
   }
 };
 
+// Rohzustand mit Defaults zusammenführen + normalisieren (für Entwurf und Live).
+function prepareState(loaded) {
+  loaded = loaded || {};
+  const merged = {
+    ...structuredClone(DEFAULT_STATE),
+    ...loaded,
+    slideshow: { ...DEFAULT_STATE.slideshow, ...(loaded.slideshow || {}) },
+    youtube: { ...DEFAULT_STATE.youtube, ...(loaded.youtube || {}) },
+    link: { ...DEFAULT_STATE.link, ...(loaded.link || {}) },
+    welcome: { ...DEFAULT_STATE.welcome, ...(loaded.welcome || {}) }
+  };
+  merged.slideshow = normalizeSlideshow(merged.slideshow);
+  merged.welcome = normalizeWelcome(merged.welcome);
+  if (merged.mode === 'welcome') merged.mode = 'slideshow'; // alter Modus entfällt
+  return merged;
+}
+
 function loadState() {
   if (!existsSync(STATE_FILE)) {
     saveState(DEFAULT_STATE);
     return structuredClone(DEFAULT_STATE);
   }
   try {
-    const loaded = JSON.parse(readFileSync(STATE_FILE, 'utf8'));
-    // Mit Defaults zusammenführen, damit neue Felder nach Updates vorhanden sind.
-    const merged = {
-      ...structuredClone(DEFAULT_STATE),
-      ...loaded,
-      slideshow: { ...DEFAULT_STATE.slideshow, ...(loaded.slideshow || {}) },
-      youtube: { ...DEFAULT_STATE.youtube, ...(loaded.youtube || {}) },
-      link: { ...DEFAULT_STATE.link, ...(loaded.link || {}) },
-      welcome: { ...DEFAULT_STATE.welcome, ...(loaded.welcome || {}) }
-    };
-    merged.slideshow = normalizeSlideshow(merged.slideshow);
-    merged.welcome = normalizeWelcome(merged.welcome);
-    if (merged.mode === 'welcome') merged.mode = 'slideshow'; // alter Modus entfällt
-    return merged;
+    return prepareState(JSON.parse(readFileSync(STATE_FILE, 'utf8')));
   } catch (err) {
     console.error('state.json konnte nicht gelesen werden, nutze Defaults:', err.message);
     return structuredClone(DEFAULT_STATE);
+  }
+}
+
+// Veröffentlichten (Live-)Zustand laden; fehlt er, wird er beim Start aus dem
+// Entwurf abgeleitet, damit die Wand sofort etwas anzeigt.
+function loadLive() {
+  if (!existsSync(LIVE_FILE)) return null;
+  try {
+    return prepareState(JSON.parse(readFileSync(LIVE_FILE, 'utf8')));
+  } catch (err) {
+    console.error('live.json konnte nicht gelesen werden:', err.message);
+    return null;
   }
 }
 
@@ -166,23 +183,41 @@ function welcomeConfigSnapshot(w) {
   };
 }
 
-// Prüft, ob eine Logo-Datei noch irgendwo referenziert wird (aktuell oder in
-// einem Preset). Verhindert, dass ein noch genutztes Logo gelöscht wird.
-function logoInUse(filename) {
-  if (!filename) return false;
-  const w = state.welcome;
-  if (w.left.logo === filename || w.right.logo === filename) return true;
+// Prüft, ob ein Welcome-Modell eine Logo-Datei referenziert (Seiten + Presets).
+function logoUsedIn(w, filename) {
+  if (!w) return false;
+  if (w.left?.logo === filename || w.right?.logo === filename) return true;
   for (const p of w.presets || []) {
     if (p.config?.left?.logo === filename || p.config?.right?.logo === filename) return true;
   }
   return false;
 }
 
-let state = loadState();
+// Prüft, ob eine Logo-Datei noch irgendwo referenziert wird – im Entwurf ODER
+// im veröffentlichten Live-Zustand. Verhindert, dass ein noch (auf der Wand)
+// genutztes Logo gelöscht wird.
+function logoInUse(filename) {
+  if (!filename) return false;
+  return logoUsedIn(state.welcome, filename) || logoUsedIn(live && live.welcome, filename);
+}
+
+let state = loadState(); // Entwurf
+let live = loadLive() || structuredClone(state); // Live (Wand)
 
 function saveState(s = state) {
   writeFileSync(STATE_FILE, JSON.stringify(s, null, 2));
 }
+
+function saveLive() {
+  writeFileSync(LIVE_FILE, JSON.stringify(live, null, 2));
+}
+
+// Entwurf und Live identisch? (Gibt es unveröffentlichte Änderungen?)
+function isDirty() {
+  return JSON.stringify(state) !== JSON.stringify(live);
+}
+
+if (!existsSync(LIVE_FILE)) saveLive(); // Live-Datei beim ersten Start anlegen
 
 function findSequence(id) {
   return state.slideshow.sequences.find((s) => s.id === id);
@@ -212,8 +247,17 @@ app.get('/screen', (req, res) => {
   res.sendFile(join(PUBLIC_DIR, 'screen.html'));
 });
 
-// Aktuellen Zustand holen (beim Laden von / und /screen).
-app.get('/api/state', (req, res) => res.json(state));
+// Aktuellen Zustand holen. `?view=live` liefert den veröffentlichten Zustand
+// (für die echte Wand), sonst den Entwurf (Steuerung + Vorschau).
+app.get('/api/state', (req, res) => res.json(req.query.view === 'live' ? live : state));
+
+// "Go Live": den Entwurf veröffentlichen -> erst jetzt ändert sich die Wand.
+app.post('/api/golive', (req, res) => {
+  live = structuredClone(state);
+  saveLive();
+  broadcast();
+  res.json({ ok: true });
+});
 
 // Zustand (teilweise) aktualisieren. Body = { mode } und/oder
 // { slideshow: {...} } / { youtube: {...} } / { welcome: {...} }.
@@ -557,27 +601,37 @@ app.delete('/api/welcome/preset/:id', (req, res) => {
 // ---------------------------------------------------------------------------
 const wss = new WebSocketServer({ server });
 
+// Wand-Clients (echtes /screen) bekommen den Live-Zustand; Steuerung und
+// Vorschau (eingebettetes /screen) bekommen den Entwurf samt `dirty`-Flag.
 function broadcast() {
-  const msg = JSON.stringify({ type: 'state', state });
+  const draftMsg = JSON.stringify({ type: 'state', state, dirty: isDirty() });
+  const liveMsg = JSON.stringify({ type: 'state', state: live });
   for (const client of wss.clients) {
-    if (client.readyState === client.OPEN) client.send(msg);
+    if (client.readyState === client.OPEN) client.send(client.isWall ? liveMsg : draftMsg);
   }
 }
 
-wss.on('connection', (ws) => {
-  // Beim Verbinden sofort den aktuellen Zustand senden.
-  ws.send(JSON.stringify({ type: 'state', state }));
+wss.on('connection', (ws, req) => {
+  // Rolle aus der Query lesen: 'preview'/'control' = Entwurf, sonst = Wand.
+  let role = '';
+  try { role = new URL(req.url, 'http://x').searchParams.get('role') || ''; } catch (_) {}
+  ws.isWall = role !== 'preview' && role !== 'control';
 
-  // Befehle (z. B. Video-Seek aus der Live-Vorschau) an alle Clients
-  // weiterreichen, damit Wand und Vorschau gleichzeitig springen. Diese
-  // Befehle sind flüchtig und werden nicht im Zustand persistiert.
+  // Beim Verbinden sofort den passenden Zustand senden.
+  ws.send(ws.isWall
+    ? JSON.stringify({ type: 'state', state: live })
+    : JSON.stringify({ type: 'state', state, dirty: isDirty() }));
+
+  // Befehle (z. B. Video-Seek aus der Vorschau) weiterreichen – aber nur an
+  // Clients derselben Sicht, damit Entwurf-Vorschau und Live-Wand sich nicht
+  // gegenseitig steuern. Flüchtig, wird nicht persistiert.
   ws.on('message', (data) => {
     let msg;
     try { msg = JSON.parse(data.toString()); } catch (_) { return; }
     if (!msg || msg.type !== 'cmd') return;
     const out = JSON.stringify(msg);
     for (const client of wss.clients) {
-      if (client.readyState === client.OPEN) client.send(out);
+      if (client.isWall === ws.isWall && client.readyState === client.OPEN) client.send(out);
     }
   });
 });

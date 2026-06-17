@@ -11,9 +11,17 @@
 <body>
   <header class="topbar">
     <h1>Screenwall</h1>
-    <button id="preview-open" class="onair" title="Live-Vorschau des Displays">
-      <span class="onair-dot"></span>On Air
-    </button>
+    <div class="topbar-actions">
+      <button id="welcome-open" class="btn ghost" title="Willkommens-Overlay einrichten">
+        Willkommens-Overlay
+      </button>
+      <button id="preview-open" class="onair" title="Vorschau des Entwurfs">
+        <span class="onair-dot"></span>Vorschau
+      </button>
+      <button id="go-live" class="go-live" disabled title="Entwurf auf die Wand veröffentlichen">
+        Live
+      </button>
+    </div>
   </header>
 
   <nav class="modes">
@@ -104,14 +112,18 @@
         Reihenfolge per Drag &amp; Drop ändern, 🗑 löscht. Hinweis: Manche Seiten
         (z.&nbsp;B. Google, YouTube-Startseite) verbieten die Einbettung und bleiben dann leer.</p>
     </section>
+  </main>
 
-    <!-- ===== Willkommens-Overlay: unabhängig von allen Modi ===========
-         Liegt auf der Wand ÜBER dem aktiven Inhalt (Diashow, YouTube oder
-         Webseite) – Dual-TV-Begrüßungsscreen: links begrüßende, rechts
-         begrüßte Firma. Daher eigene, immer sichtbare Sektion. -->
-    <section class="wc-section">
-      <h2>Willkommens-Overlay</h2>
-      <p class="hint">Wird über dem aktuell laufenden Modus (Diashow, YouTube oder Webseite) eingeblendet.</p>
+  <!-- Willkommens-Overlay: Einrichtung im Modal (Button in der Kopfzeile).
+       Liegt auf der Wand ÜBER dem aktiven Inhalt (Diashow, YouTube, Webseite)
+       und wird wie alle Änderungen erst per „Go Live" wirksam. -->
+  <div id="welcome-modal" class="modal hidden">
+    <div class="modal-box wc-modal-box">
+      <div class="wc-modal-head">
+        <h3>Willkommens-Overlay</h3>
+        <button id="welcome-close" class="btn ghost">Schließen</button>
+      </div>
+      <p class="hint">Wird auf der Wand über dem aktuell laufenden Modus (Diashow, YouTube oder Webseite) eingeblendet.</p>
       <div class="wc-section-inner">
         <label class="checkbox">
           <input type="checkbox" id="wc-visible" />
@@ -216,8 +228,8 @@
           </div>
         </div>
       </div>
-    </section>
-  </main>
+    </div>
+  </div>
 
   <footer class="footer">
     <span class="status">
@@ -236,7 +248,7 @@
   <div id="preview-modal" class="modal hidden">
     <div class="preview-box">
       <div class="preview-head">
-        <span>Live-Vorschau · 4320×3840 (18:16, 2× 4K hochkant)</span>
+        <span>Vorschau (Entwurf – noch nicht live) · 4320×3840 (18:16, 2× 4K hochkant)</span>
         <button id="preview-close" class="btn ghost">Schließen</button>
       </div>
       <div id="preview-stage" class="preview-stage">
