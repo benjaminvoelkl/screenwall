@@ -270,6 +270,11 @@ app.get('/screen', (req, res) => {
   res.set('Cache-Control', 'no-cache');
   res.sendFile(join(PUBLIC_DIR, 'screen.html'));
 });
+// Steuerung/Einstellungen (früher unter /). / ist jetzt der Live-Monitor.
+app.get('/settings', (req, res) => {
+  res.set('Cache-Control', 'no-cache');
+  res.sendFile(join(PUBLIC_DIR, 'settings.html'));
+});
 
 // Aktuellen Zustand holen. `?view=live` liefert den veröffentlichten Zustand
 // (für die echte Wand), sonst den Entwurf (Steuerung + Vorschau).

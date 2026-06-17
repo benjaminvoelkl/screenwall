@@ -21,9 +21,14 @@
   };
 
   let current = null; // letzter Zustand
-  // Läuft /screen eingebettet in der Live-Vorschau? Dann synchronisiert es sich
-  // zur echten Wand (statt selbst bei null zu starten) und meldet seine Position.
+  // Sicht dieses /screen-Tabs:
+  //  'wall'    = echte Wand (eigenständig, Live)
+  //  'monitor' = eingebetteter Live-Mirror auf der Startseite (?view=live, Live)
+  //  'preview' = eingebettete Entwurf-Vorschau in den Einstellungen
   const embedded = !!(window.parent && window.parent !== window);
+  const forceLive = new URLSearchParams(location.search).get('view') === 'live';
+  const viewer = !embedded ? 'wall' : (forceLive ? 'monitor' : 'preview');
+  const isPreview = viewer === 'preview'; // einzige Sicht, die den Entwurf zeigt
 
   // ---- WebSocket mit Auto-Reconnect --------------------------------------
   let ws = null;
@@ -31,8 +36,8 @@
 
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    // Eingebettet = Vorschau -> Entwurf; sonst echte Wand -> Live-Zustand.
-    ws = new WebSocket(`${proto}://${location.host}/${embedded ? '?role=preview' : ''}`);
+    // Nur die Entwurf-Vorschau bekommt den Entwurf; Wand + Live-Monitor = Live.
+    ws = new WebSocket(`${proto}://${location.host}/${isPreview ? '?role=preview' : ''}`);
 
     ws.addEventListener('open', () => {
       els.offline.classList.add('hidden');
@@ -42,10 +47,10 @@
         const msg = JSON.parse(ev.data);
         if (msg.type === 'state') applyState(msg.state);
         else if (msg.type === 'cmd' && msg.cmd === 'seek') seekCurrent(msg.time);
-        // Wand meldet, was gerade läuft -> Vorschau springt dorthin.
-        else if (msg.type === 'cmd' && msg.cmd === 'nowplaying') { if (embedded) applyNowPlaying(msg); }
-        // Vorschau fragt beim Start -> Wand antwortet sofort mit ihrer Position.
-        else if (msg.type === 'cmd' && msg.cmd === 'sync-request') { if (!embedded) sendNowPlaying(); }
+        // Wand meldet, was gerade läuft -> Entwurf-Vorschau springt dorthin.
+        else if (msg.type === 'cmd' && msg.cmd === 'nowplaying') { if (isPreview) applyNowPlaying(msg); }
+        // Vorschau fragt beim Start -> Live-Sicht antwortet mit ihrer Position.
+        else if (msg.type === 'cmd' && msg.cmd === 'sync-request') { if (!isPreview) sendNowPlaying(); }
       } catch (_) { /* ignorieren */ }
     });
     ws.addEventListener('close', () => {
@@ -66,8 +71,8 @@
   connect();
 
   // Fallback: aktuellen Zustand auch per HTTP holen (falls WS verzögert).
-  // Wand holt den Live-Zustand, die Vorschau den Entwurf.
-  fetch('/api/state' + (embedded ? '' : '?view=live'))
+  // Entwurf-Vorschau holt den Entwurf, Wand + Live-Monitor den Live-Zustand.
+  fetch('/api/state' + (isPreview ? '' : '?view=live'))
     .then((r) => r.json()).then(applyState).catch(() => {});
 
   // ---- Zustand anwenden ---------------------------------------------------
@@ -499,7 +504,7 @@
   // ---- Synchronisierung Wand <-> Vorschau ---------------------------------
   // Die echte Wand sendet laufend, welches Video an welcher Stelle läuft.
   function sendNowPlaying() {
-    if (embedded || !ws || ws.readyState !== WebSocket.OPEN) return;
+    if (isPreview || !ws || ws.readyState !== WebSocket.OPEN) return;
     const mode = current && current.mode;
     let np = null;
     if (mode === 'youtube') np = YT.nowPlaying();
@@ -520,9 +525,9 @@
     }
   }
 
-  if (embedded) {
-    // Vorschau: aktuelle Position an die Positionsleiste der Steuerung melden
-    // und bei Bedarf einen sofortigen Sync von der Wand anfordern.
+  if (isPreview) {
+    // Entwurf-Vorschau: aktuelle Position an die Positionsleiste der Steuerung
+    // melden und bei Bedarf einen sofortigen Sync anfordern.
     setInterval(() => {
       const mode = current && current.mode;
       let pos = null;
@@ -533,7 +538,8 @@
     requestSync();
     setInterval(requestSync, 2000); // bis die Wand antwortet / bei Modeswechsel
   } else {
-    // Wand: laufender Heartbeat, damit neu geöffnete Vorschauen aufspringen.
+    // Wand + Live-Monitor: Heartbeat, damit die Steuerung das laufende Video
+    // (Now-Playing/Playtime) anzeigen kann.
     setInterval(sendNowPlaying, 1000);
   }
 
