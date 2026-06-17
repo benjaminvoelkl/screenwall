@@ -270,10 +270,15 @@ app.get('/screen', (req, res) => {
   res.set('Cache-Control', 'no-cache');
   res.sendFile(join(PUBLIC_DIR, 'screen.html'));
 });
-// Steuerung/Einstellungen (früher unter /). / ist jetzt der Live-Monitor.
+// Steuerung/Programmplanung (früher unter /). / ist jetzt der Live-Monitor.
 app.get('/settings', (req, res) => {
   res.set('Cache-Control', 'no-cache');
   res.sendFile(join(PUBLIC_DIR, 'settings.html'));
+});
+// Willkommens-Overlay als eigene Seite.
+app.get('/overlay', (req, res) => {
+  res.set('Cache-Control', 'no-cache');
+  res.sendFile(join(PUBLIC_DIR, 'overlay.html'));
 });
 
 // Aktuellen Zustand holen. `?view=live` liefert den veröffentlichten Zustand
@@ -656,8 +661,9 @@ wss.on('connection', (ws, req) => {
   ws.send(ws.isWall
     ? JSON.stringify({ type: 'state', state: live })
     : JSON.stringify({ type: 'state', state, dirty: isDirty() }));
-  // Steuerung erfährt sofort, was gerade live läuft (für den Playing-Indikator).
-  if (ws.role === 'control' && liveNowPlaying) {
+  // Steuerung (Indikator) und Live-Monitor (folgt der Wand) erfahren sofort,
+  // was gerade live läuft.
+  if ((ws.role === 'control' || ws.role === 'monitor') && liveNowPlaying) {
     ws.send(JSON.stringify({ type: 'cmd', cmd: 'nowplaying', ...liveNowPlaying }));
   }
 
@@ -666,15 +672,19 @@ wss.on('connection', (ws, req) => {
     try { msg = JSON.parse(data.toString()); } catch (_) { return; }
     if (!msg || msg.type !== 'cmd') return;
 
-    // "nowplaying" der Wand: merken und an die Steuerung weiterreichen, damit
-    // diese das laufende Video markieren kann (die Vorschau zeigt den Entwurf
-    // und soll der Wand nicht folgen – daher NICHT an preview).
-    if (msg.cmd === 'nowplaying' && ws.isWall) {
-      const { type, ...rest } = msg;
-      liveNowPlaying = rest;
-      const out = JSON.stringify(msg);
-      for (const client of wss.clients) {
-        if (client.role === 'control' && client.readyState === client.OPEN) client.send(out);
+    // "nowplaying": nur die echte Wand ist die Quelle (isWall, aber nicht der
+    // Monitor). Merken und an Steuerung (Indikator) + Live-Monitor (Sync)
+    // weiterreichen – NICHT an die Entwurf-Vorschau. Meldungen anderer Sichten
+    // werden verworfen (kein generisches Relay), damit nichts „zurückspiegelt".
+    if (msg.cmd === 'nowplaying') {
+      if (ws.isWall && ws.role !== 'monitor') {
+        const { type, ...rest } = msg;
+        liveNowPlaying = rest;
+        const out = JSON.stringify(msg);
+        for (const client of wss.clients) {
+          if ((client.role === 'control' || client.role === 'monitor')
+            && client.readyState === client.OPEN) client.send(out);
+        }
       }
       return;
     }

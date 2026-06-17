@@ -24,30 +24,6 @@
   scale();
   window.addEventListener('resize', scale);
 
-  // ---- WebSocket: Verbindungsstatus + aktueller Live-Modus ----------------
-  const MODE_LABEL = { slideshow: 'Diashow', youtube: 'YouTube', link: 'Webseite' };
-  let ws = null;
-  function setConn(on) { $('conn-dot').classList.toggle('on', on); }
-  function setMode(mode) {
-    $('onair-mode').textContent = MODE_LABEL[mode] || '–';
-  }
-  function connect() {
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    // Ohne Rolle = Live-Sicht (wie die Wand) -> wir erfahren den Live-Zustand.
-    ws = new WebSocket(`${proto}://${location.host}/`);
-    ws.addEventListener('open', () => setConn(true));
-    ws.addEventListener('message', (ev) => {
-      try {
-        const msg = JSON.parse(ev.data);
-        if (msg.type === 'state' && msg.state) setMode(msg.state.mode);
-      } catch (_) {}
-    });
-    ws.addEventListener('close', () => { setConn(false); setTimeout(connect, 1500); });
-    ws.addEventListener('error', () => ws.close());
-  }
-  connect();
-  fetch('/api/state?view=live').then((r) => r.json()).then((s) => setMode(s.mode)).catch(() => {});
-
   // ---- Systemlautstärke (wpctl auf dem Wand-Rechner) ----------------------
   const volRange = $('vol-range'), volVal = $('vol-val'), volMute = $('vol-mute');
   let lastVolSent = 0;

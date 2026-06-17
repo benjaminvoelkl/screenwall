@@ -40,9 +40,9 @@
           if (typeof msg.dirty === 'boolean') setDirty(msg.dirty);
           render();
         } else if (msg.type === 'cmd' && msg.cmd === 'nowplaying') {
-          // Was läuft gerade auf der echten Wand (live)? -> Playing-Indikator.
+          // Was läuft gerade auf der echten Wand (live)? -> roter Live-Rahmen.
           liveNowPlaying = msg;
-          applyYtNowPlaying();
+          applyLiveNow();
         }
       } catch (_) {}
     });
@@ -63,19 +63,20 @@
   });
 
   // ---- Go Live: Entwurf veröffentlichen -----------------------------------
-  // Solange unveröffentlichte Änderungen bestehen (dirty), leuchtet der Button.
+  // Vorschau + Go Live erscheinen nur, wenn es unveröffentlichte Änderungen
+  // gegenüber dem Live-Zustand gibt (dirty).
   function setDirty(dirty) {
-    const btn = $('go-live');
-    if (!btn) return;
-    btn.classList.toggle('pending', dirty);
-    btn.disabled = !dirty;
-    btn.textContent = dirty ? '● Go Live' : 'Live';
+    const live = $('go-live');
+    const prev = $('preview-open');
+    if (live) {
+      live.classList.toggle('hidden', !dirty);
+      live.classList.toggle('pending', dirty);
+      live.textContent = '● Go Live';
+    }
+    if (prev) prev.classList.toggle('hidden', !dirty);
   }
   // Go Live öffnet eine Bestätigung mit Entwurf-Vorschau + Slide-to-go-live.
-  $('go-live').addEventListener('click', () => {
-    if ($('go-live').disabled) return;
-    openGoLive();
-  });
+  $('go-live').addEventListener('click', openGoLive);
 
   function scaleGoliveStage() {
     const stage = $('golive-stage');
@@ -159,17 +160,6 @@
     if (!$('golive-modal').classList.contains('hidden')) { scaleGoliveStage(); if (!sliding) setSlide(slideDone ? slideTravel() : 0); }
   });
 
-  // ---- Willkommens-Overlay: Modal öffnen/schließen ------------------------
-  function openWelcome() { $('welcome-modal').classList.remove('hidden'); }
-  function closeWelcome() { $('welcome-modal').classList.add('hidden'); }
-  $('welcome-open').addEventListener('click', openWelcome);
-  $('welcome-close').addEventListener('click', closeWelcome);
-  $('welcome-modal').addEventListener('click', (e) => {
-    if (e.target === $('welcome-modal')) closeWelcome(); // Klick auf Backdrop
-  });
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !$('welcome-modal').classList.contains('hidden')) closeWelcome();
-  });
 
   // ===== Modus 1: Diashow =================================================
   $('ss-duration').addEventListener('change', (e) =>
@@ -442,6 +432,7 @@
     }
     enableDragReorder(ul, () =>
       saveMediaOrder(Array.from(ul.children).map((c) => c.dataset.id)));
+    applyLiveNow();
   }
 
   // ===== Modus 2: YouTube =================================================
@@ -561,36 +552,45 @@
       patchYtSequences(state.youtube.sequences.map((s) =>
         s.id === seq.id ? { ...s, videos: order.map((id) => byId.get(id)).filter(Boolean) } : s));
     });
-    applyYtNowPlaying();
+    applyLiveNow();
   }
 
-  // Markiert das gerade auf der Wand laufende Video und zeigt die Playtime.
-  // Spiegelt den Live-Zustand (nicht den Entwurf) wider.
+  // Markiert die Inhalte, die GERADE LIVE auf der Wand laufen, mit rotem Rahmen
+  // (Bilder, YouTube, Links). Spiegelt den Live-Zustand wider, nicht den Entwurf.
   function fmtClock(s) {
     s = Math.max(0, Math.floor(s || 0));
     const m = Math.floor(s / 60);
     return `${m}:${String(s % 60).padStart(2, '0')}`;
   }
-  function applyYtNowPlaying() {
-    const ul = $('yt-list');
+  function liMatchesLive(li, np) {
+    if (!np) return false;
+    return (np.id && li.dataset.id === np.id)
+      || (np.mediaId && li.dataset.id === np.mediaId)
+      || (np.videoId && li.dataset.videoId === np.videoId)
+      || (np.url && li.dataset.url === np.url);
+  }
+  function markLiveList(ul, np) {
     if (!ul) return;
-    const np = liveNowPlaying;
-    const live = np && np.mode === 'youtube' ? np : null;
     for (const li of ul.children) {
-      const match = live && (li.dataset.id === live.id || li.dataset.videoId === live.videoId);
-      li.classList.toggle('playing', !!match);
-      const now = li.querySelector('.yt-now');
+      const match = liMatchesLive(li, np);
+      li.classList.toggle('live-now', match);
+      const now = li.querySelector('.yt-now'); // nur YouTube hat Playtime
       if (!now) continue;
       now.classList.toggle('hidden', !match);
-      if (match) {
-        const dur = live.duration || 0;
-        const t = live.time || 0;
+      if (match && np) {
+        const dur = np.duration || 0, t = np.time || 0;
         const pct = dur > 0 ? Math.min(100, (t / dur) * 100) : 0;
         now.querySelector('.yt-progress-bar').style.width = `${pct}%`;
         now.querySelector('.yt-time').textContent =
           dur > 0 ? `${fmtClock(t)} / ${fmtClock(dur)}` : fmtClock(t);
       }
     }
+  }
+  function applyLiveNow() {
+    const np = liveNowPlaying || {};
+    markLiveList($('ss-list'), np.mode === 'slideshow' ? np : null);
+    markLiveList($('yt-list'), np.mode === 'youtube' ? np : null);
+    markLiveList($('link-list'), np.mode === 'link' ? np : null);
   }
 
   // ===== Modus 3: Link ====================================================
@@ -632,6 +632,7 @@
       li.className = 'media-item';
       li.draggable = true;
       li.dataset.id = it.id;
+      li.dataset.url = it.url;
       let status = '<span class="link-ok">✓ einbettbar</span>';
       if (it.embeddable === false) status = `<span class="link-bad" title="${escapeHtml(it.reason || '')}">⚠ Einbettung blockiert</span>`;
       else if (it.embeddable !== true) status = '<span class="link-unknown">? nicht geprüft</span>';
@@ -652,121 +653,10 @@
       const byId = new Map(state.link.items.map((x) => [x.id, x]));
       postState({ link: { items: order.map((id) => byId.get(id)).filter(Boolean) } });
     });
+    applyLiveNow();
   }
 
-  // ===== Willkommens-Overlay (eigenständig, über jedem Modus) ============
-  $('wc-visible').addEventListener('change', (e) =>
-    postState({ welcome: { visible: e.target.checked } }));
-  // Vorlage-Dropdown enthält Stile (style:…) und eigene Vorlagen (preset:…).
-  let curTplSel = null;
-  $('wc-template').addEventListener('change', (e) => {
-    const v = e.target.value;
-    curTplSel = v;
-    if (v.startsWith('preset:')) {
-      fetch(`/api/welcome/preset/${v.slice(7)}/apply`, { method: 'POST' });
-    } else if (v.startsWith('style:')) {
-      postState({ welcome: { template: v.slice(6) } });
-    }
-  });
-  $('wc-fontsize').addEventListener('input', (e) => {
-    $('wc-fontsize-val').textContent = `${e.target.value} vw`;
-    postState({ welcome: { fontSize: Number(e.target.value) } });
-  });
-  $('wc-blur').addEventListener('input', (e) => {
-    $('wc-blur-val').textContent = `${e.target.value} px`;
-    postState({ welcome: { blur: Number(e.target.value) } });
-  });
-  $('wc-headline').addEventListener('input', (e) =>
-    postState({ welcome: { headline: e.target.value } }));
-
-  // Pro Seite: Text, Textgröße, Logogröße.
-  for (const side of ['left', 'right']) {
-    $(`wc-${side}-text`).addEventListener('input', (e) =>
-      postState({ welcome: { [side]: { text: e.target.value } } }));
-    $(`wc-${side}-textsize`).addEventListener('input', (e) => {
-      $(`wc-${side}-textsize-val`).textContent = `${e.target.value} vw`;
-      postState({ welcome: { [side]: { textSize: Number(e.target.value) } } });
-    });
-    $(`wc-${side}-logosize`).addEventListener('input', (e) => {
-      $(`wc-${side}-logosize-val`).textContent = `${e.target.value} vw`;
-      postState({ welcome: { [side]: { logoSize: Number(e.target.value) } } });
-    });
-    // Logo-Position (oben/unten) per Drag & Drop der zwei Einträge.
-    enableWcOrder($(`wc-${side}-order`), (parts) =>
-      postState({ welcome: { [side]: { logoPos: parts[0] === 'logo' ? 'top' : 'bottom' } } }));
-  }
-
-  // Logo-Upload je Seite (eigener Endpoint, speichert Dateiname am welcome-State).
-  function bindLogo(side) {
-    $(`wc-${side}-logo`).addEventListener('change', async (e) => {
-      const file = e.target.files[0];
-      e.target.value = '';
-      if (!file) return;
-      const fd = new FormData();
-      fd.append('side', side);
-      fd.append('file', file, file.name || 'logo');
-      await fetch('/api/welcome/logo', { method: 'POST', body: fd });
-    });
-    $(`wc-${side}-logo-del`).addEventListener('click', async () => {
-      await fetch('/api/welcome/logo', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ side })
-      });
-    });
-  }
-  bindLogo('left');
-  bindLogo('right');
-
-  // Speichern: aktuelle Gestaltung als eigene Vorlage (Preset) anlegen.
-  $('wc-preset-save').addEventListener('click', async () => {
-    const n = (state.welcome.presets || []).length + 1;
-    const name = prompt('Name der Vorlage:', `Vorlage ${n}`);
-    if (name === null) return;
-    const r = await fetch('/api/welcome/preset', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name })
-    });
-    const created = await r.json();
-    if (created && created.id) curTplSel = `preset:${created.id}`; // gleich auswählen
-  });
-
-  // Löschen: die aktuell gewählte eigene Vorlage entfernen.
-  $('wc-preset-delete').addEventListener('click', () => {
-    const v = $('wc-template').value;
-    if (!v.startsWith('preset:')) return;
-    const id = v.slice(7);
-    const p = (state.welcome.presets || []).find((x) => x.id === id);
-    if (p && confirm(`Eigene Vorlage „${p.name}" löschen?`)) {
-      fetch(`/api/welcome/preset/${id}`, { method: 'DELETE' });
-      curTplSel = null;
-    }
-  });
-
-  // Vorlage-Dropdown füllen (Stile + eigene Vorlagen) und Auswahl/Buttons setzen.
-  function renderTemplateSelect() {
-    const sel = $('wc-template');
-    if (document.activeElement === sel) return; // nicht stören, während offen
-    const grp = $('wc-template-presets');
-    grp.innerHTML = '';
-    const presets = state.welcome.presets || [];
-    for (const p of presets) {
-      const o = document.createElement('option');
-      o.value = `preset:${p.id}`;
-      o.textContent = p.name;
-      grp.appendChild(o);
-    }
-    grp.hidden = presets.length === 0;
-    // Gewünschte Auswahl: gemerkte Auswahl, sonst der aktive Stil.
-    let want = curTplSel;
-    if (!want || ![...sel.options].some((o) => o.value === want)) {
-      want = `style:${state.welcome.template || 'elegant'}`;
-    }
-    sel.value = want;
-    curTplSel = sel.value;
-    $('wc-preset-delete').disabled = !sel.value.startsWith('preset:');
-  }
+  // (Willkommens-Overlay ist eine eigene Seite /overlay -> overlay.js)
 
   // ===== Drag & Drop Reorder (gemeinsam) =================================
   function enableDragReorder(container, onDrop) {
@@ -796,30 +686,6 @@
       if (offset < 0 && offset > closest.offset) closest = { offset, el: child };
     }
     return closest.el;
-  }
-
-  // Mini-Drag&Drop für die zwei Logo/Text-Einträge einer Seite (horizontal).
-  function enableWcOrder(container, onChange) {
-    let dragging = null;
-    container.querySelectorAll('.wc-order-item').forEach((item) => {
-      item.addEventListener('dragstart', () => { dragging = item; item.classList.add('dragging'); });
-      item.addEventListener('dragend', () => {
-        item.classList.remove('dragging');
-        dragging = null;
-        onChange(Array.from(container.children).map((c) => c.dataset.part));
-      });
-    });
-    container.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      if (!dragging) return;
-      const others = [...container.querySelectorAll('.wc-order-item:not(.dragging)')];
-      const after = others.find((c) => {
-        const box = c.getBoundingClientRect();
-        return e.clientX <= box.left + box.width / 2;
-      });
-      if (after == null) container.appendChild(dragging);
-      else container.insertBefore(dragging, after);
-    });
   }
 
   // ===== Render gesamten Zustand in die UI ===============================
@@ -866,44 +732,6 @@
     // Link
     setIfNotFocused($('link-duration'), state.link.durationSec);
     renderLinkList();
-
-    // Willkommens-Overlay
-    const w = state.welcome;
-    setIfNotFocused($('wc-visible'), w.visible);
-    renderTemplateSelect();
-    setIfNotFocused($('wc-fontsize'), w.fontSize);
-    $('wc-fontsize-val').textContent = `${w.fontSize} vw`;
-    setIfNotFocused($('wc-blur'), w.blur);
-    $('wc-blur-val').textContent = `${w.blur} px`;
-    setIfNotFocused($('wc-headline'), w.headline);
-    for (const side of ['left', 'right']) {
-      const s = w[side];
-      setIfNotFocused($(`wc-${side}-text`), s.text);
-      setIfNotFocused($(`wc-${side}-textsize`), s.textSize);
-      $(`wc-${side}-textsize-val`).textContent = `${s.textSize} vw`;
-      setIfNotFocused($(`wc-${side}-logosize`), s.logoSize);
-      $(`wc-${side}-logosize-val`).textContent = `${s.logoSize} vw`;
-      renderLogoPreview(side, s.logo);
-      renderWcOrder(side, s.logoPos);
-    }
-  }
-
-  function renderLogoPreview(side, logo) {
-    const img = $(`wc-${side}-preview`);
-    if (logo) { img.src = `/uploads/${logo}`; img.classList.remove('hidden'); }
-    else { img.removeAttribute('src'); img.classList.add('hidden'); }
-    $(`wc-${side}-logo-del`).disabled = !logo;
-  }
-
-  // Die zwei Drag-Einträge so sortieren, dass sie zum logoPos passen.
-  function renderWcOrder(side, logoPos) {
-    const c = $(`wc-${side}-order`);
-    const logo = c.querySelector('[data-part="logo"]');
-    const text = c.querySelector('[data-part="text"]');
-    const first = logoPos === 'bottom' ? text : logo;
-    const second = logoPos === 'bottom' ? logo : text;
-    c.appendChild(first);
-    c.appendChild(second);
   }
 
   // ===== Utils ===========================================================

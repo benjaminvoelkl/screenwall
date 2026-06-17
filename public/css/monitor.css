@@ -41,39 +41,28 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
 }
 .settings-link:hover { border-color: var(--accent); }
 
-/* ===== Dezenter, schmaler On-Air-Streifen ===== */
+/* ===== Schmaler, mittiger On-Air-Streifen ===== */
 .onair-bar {
-  display: flex; align-items: center; gap: 9px;
+  display: flex; align-items: center; justify-content: center; gap: 10px;
   padding: 5px 22px;
-  background: rgba(255, 45, 45, 0.07);
-  border-bottom: 1px solid rgba(255, 45, 45, 0.22);
-  color: #ff7a7a;
+  background: #e51f25;
+  color: #fff;
   font-size: 12px;
 }
 .onair-dot {
   width: 8px; height: 8px; border-radius: 50%;
-  background: var(--onair); box-shadow: 0 0 0 0 rgba(255, 45, 45, 0.5);
+  background: #fff; box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.6);
   animation: onair-pulse 2s ease-out infinite;
 }
 @keyframes onair-pulse {
-  0%   { box-shadow: 0 0 0 0 rgba(255, 45, 45, 0.5); }
-  70%  { box-shadow: 0 0 0 7px rgba(255, 45, 45, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(255, 45, 45, 0); }
+  0%   { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.6); }
+  70%  { box-shadow: 0 0 0 7px rgba(255, 255, 255, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0); }
 }
 @media (prefers-reduced-motion: reduce) { .onair-dot { animation: none; } }
 .onair-label {
   font-weight: 700; letter-spacing: 0.22em; text-transform: uppercase;
 }
-.onair-sep { color: rgba(255, 122, 122, 0.5); }
-.onair-mode {
-  color: var(--muted); letter-spacing: 0.12em; text-transform: uppercase;
-}
-.conn { margin-left: auto; display: inline-flex; align-items: center; }
-.conn .dot {
-  width: 9px; height: 9px; border-radius: 50%; display: inline-block;
-  background: rgba(255, 255, 255, 0.3);
-}
-.conn .dot.on { background: #46f08a; box-shadow: 0 0 7px rgba(70, 240, 138, 0.7); }
 
 /* ===== Monitor-Fläche ===== */
 .monitor-main {

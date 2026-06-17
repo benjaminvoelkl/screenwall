@@ -36,8 +36,10 @@
 
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    // Nur die Entwurf-Vorschau bekommt den Entwurf; Wand + Live-Monitor = Live.
-    ws = new WebSocket(`${proto}://${location.host}/${isPreview ? '?role=preview' : ''}`);
+    // Rolle: Vorschau = Entwurf; Monitor = Live + folgt der Wand; Wand = Live (Quelle).
+    const roleParam = viewer === 'preview' ? '?role=preview'
+      : viewer === 'monitor' ? '?role=monitor' : '';
+    ws = new WebSocket(`${proto}://${location.host}/${roleParam}`);
 
     ws.addEventListener('open', () => {
       els.offline.classList.add('hidden');
@@ -47,10 +49,10 @@
         const msg = JSON.parse(ev.data);
         if (msg.type === 'state') applyState(msg.state);
         else if (msg.type === 'cmd' && msg.cmd === 'seek') seekCurrent(msg.time);
-        // Wand meldet, was gerade läuft -> Entwurf-Vorschau springt dorthin.
-        else if (msg.type === 'cmd' && msg.cmd === 'nowplaying') { if (isPreview) applyNowPlaying(msg); }
-        // Vorschau fragt beim Start -> Live-Sicht antwortet mit ihrer Position.
-        else if (msg.type === 'cmd' && msg.cmd === 'sync-request') { if (!isPreview) sendNowPlaying(); }
+        // Wand meldet, was gerade läuft -> Live-Monitor springt dorthin (folgt der Wand).
+        else if (msg.type === 'cmd' && msg.cmd === 'nowplaying') { if (viewer === 'monitor') applyNowPlaying(msg); }
+        // Eine Sicht fragt beim Start -> die Wand antwortet mit ihrer Position.
+        else if (msg.type === 'cmd' && msg.cmd === 'sync-request') { if (viewer === 'wall') sendNowPlaying(); }
       } catch (_) { /* ignorieren */ }
     });
     ws.addEventListener('close', () => {
@@ -489,7 +491,13 @@
       }
     }
 
-    return { update, stop };
+    // Welcher Link wird gerade angezeigt? (für den Live-Indikator der Steuerung)
+    function nowPlaying() {
+      const it = items[idx];
+      return it ? { id: it.id, url: it.url } : null;
+    }
+
+    return { update, stop, nowPlaying };
   })();
 
   // ---- Video-Seek (Befehl aus der Live-Vorschau) --------------------------
@@ -504,13 +512,15 @@
   // ---- Synchronisierung Wand <-> Vorschau ---------------------------------
   // Die echte Wand sendet laufend, welches Video an welcher Stelle läuft.
   function sendNowPlaying() {
-    if (isPreview || !ws || ws.readyState !== WebSocket.OPEN) return;
+    // Nur die echte Wand ist die Quelle; Monitor/Vorschau melden nichts.
+    if (viewer !== 'wall' || !ws || ws.readyState !== WebSocket.OPEN) return;
     const mode = current && current.mode;
     let np = null;
     if (mode === 'youtube') np = YT.nowPlaying();
     else if (mode === 'slideshow') np = Slideshow.nowPlaying();
-    // Immer mit aktuellem Modus melden, damit die Steuerung den Playing-Indikator
-    // löschen kann, wenn die Wand gerade kein YouTube zeigt.
+    else if (mode === 'link') np = LinkShow.nowPlaying();
+    // Immer mit aktuellem Modus melden, damit die Steuerung den Live-Rahmen
+    // korrekt setzen/löschen kann.
     ws.send(JSON.stringify({ type: 'cmd', cmd: 'nowplaying', mode, ...(np || {}) }));
   }
   // Die Vorschau springt auf die gemeldete Position der Wand.
@@ -525,7 +535,7 @@
     }
   }
 
-  if (isPreview) {
+  if (viewer === 'preview') {
     // Entwurf-Vorschau: aktuelle Position an die Positionsleiste der Steuerung
     // melden und bei Bedarf einen sofortigen Sync anfordern.
     setInterval(() => {
@@ -537,9 +547,13 @@
     }, 250);
     requestSync();
     setInterval(requestSync, 2000); // bis die Wand antwortet / bei Modeswechsel
+  } else if (viewer === 'monitor') {
+    // Live-Monitor (Startseite): der Wand folgen – beim Laden und periodisch
+    // ihre Position anfordern, damit er nicht bei jedem Reload von vorn startet.
+    requestSync();
+    setInterval(requestSync, 2000);
   } else {
-    // Wand + Live-Monitor: Heartbeat, damit die Steuerung das laufende Video
-    // (Now-Playing/Playtime) anzeigen kann.
+    // Wand: Quelle. Heartbeat, damit Monitor & Steuerung folgen können.
     setInterval(sendNowPlaying, 1000);
   }
 
