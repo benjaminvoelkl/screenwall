@@ -46,7 +46,10 @@
         <span class="tl-title" id="tl-title">Programm</span>
         <span id="tl-total">Gesamt: 0:00</span>
         <span class="tl-zoom">Zoom
-          <input type="range" id="tl-zoom" min="3" max="48" step="1" value="12" />
+          <span class="tl-zoom-end">Detail</span>
+          <input type="range" id="tl-zoom" min="0" max="100" step="1" value="100" />
+          <span class="tl-zoom-end">Alles</span>
+          <button id="tl-fit" class="tl-tbtn" title="Komplette Timeline anzeigen">⤢ Alles</button>
         </span>
         <span class="hint" style="margin:0">Spur anklicken/ziehen = scrubben.</span>
       </div>

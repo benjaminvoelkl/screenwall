@@ -96,24 +96,31 @@
   // ===== Rendering =========================================================
   const TYPE_BADGE = { color: '🎨', image: '🖼', video: '🎬', youtube: '▶', webpage: '🌐', screenshare: '🖥' };
 
+  // Zoom: Slider 0 = max. Detail, 100 = "Alles" (komplette Timeline passt in die
+  // sichtbare Breite). Fit-Wert ergibt sich aus Gesamtdauer und Containerbreite.
+  const MAX_DETAIL_PX = 60;
+  function fitPxPerSec() {
+    const avail = $('tl-scroll').clientWidth - 8;
+    return total > 0 ? Math.max(0.5, avail / total) : MAX_DETAIL_PX;
+  }
+  function zoomPxPerSec() {
+    const v = Number($('tl-zoom').value);
+    const fit = fitPxPerSec();
+    const detail = Math.max(fit, MAX_DETAIL_PX);
+    return fit + (detail - fit) * (1 - v / 100);
+  }
+
   function render() {
     if (!state || !state.playlists) return;
-    pxPerSec = Number($('tl-zoom').value) || 12;
 
     const pls = state.playlists;
     const root = pls.byId[pls.rootId];
     $('tl-title').textContent = root ? `Programm: ${root.name}` : 'Programm';
     seq = root ? flatten(pls.rootId, pls.byId, new Set()) : [];
 
-    // Layout berechnen
-    blocks = [];
-    let acc = 0;
-    for (const e of seq) {
-      const dur = blockDur(e.itemId, e.content);
-      blocks.push({ itemId: e.itemId, content: e.content, start: acc, dur, x: acc * pxPerSec, w: Math.max(8, dur * pxPerSec) });
-      acc += dur;
-    }
-    total = acc;
+    // 1) Dauern + Gesamtdauer (unabhängig vom Zoom).
+    const durs = seq.map((e) => blockDur(e.itemId, e.content));
+    total = durs.reduce((a, b) => a + b, 0);
 
     const empty = seq.length === 0;
     $('prog-empty').classList.toggle('hidden', !empty);
@@ -121,7 +128,19 @@
     $('tl-total').textContent = `Gesamt: ${fmtClock(total)}`;
     if (empty) { return; }
 
-    const widthPx = Math.max($('tl-scroll').clientWidth, total * pxPerSec + 40);
+    // 2) Zoom bestimmen (Fit braucht die Gesamtdauer).
+    pxPerSec = zoomPxPerSec();
+
+    // 3) Block-Layout.
+    blocks = [];
+    let acc = 0;
+    for (let i = 0; i < seq.length; i++) {
+      const e = seq[i], dur = durs[i];
+      blocks.push({ itemId: e.itemId, content: e.content, start: acc, dur, x: acc * pxPerSec, w: Math.max(6, dur * pxPerSec) });
+      acc += dur;
+    }
+
+    const widthPx = Math.max($('tl-scroll').clientWidth, Math.ceil(total * pxPerSec));
     $('tl-tracks').style.width = widthPx + 'px';
 
     renderRuler(widthPx);
@@ -252,6 +271,7 @@
   })();
 
   $('tl-zoom').addEventListener('input', render);
+  $('tl-fit').addEventListener('click', () => { $('tl-zoom').value = 100; render(); });
   window.addEventListener('resize', () => { scaleInlinePreview(); render(); });
 
   // ===== Vorschau-Skalierung (18:16) =======================================

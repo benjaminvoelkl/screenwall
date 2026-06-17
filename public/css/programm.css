@@ -45,6 +45,8 @@
 .tl-tbtn:hover { border-color: var(--accent); }
 .tl-zoom { display: flex; align-items: center; gap: 8px; }
 .tl-zoom input[type="range"] { width: 160px; accent-color: var(--accent); cursor: pointer; }
+.tl-zoom-end { font-size: 11px; color: var(--muted); letter-spacing: 0.02em; }
+.tl-zoom .tl-tbtn { padding: 5px 10px; font-size: 13px; }
 
 /* Gutter (Spurnamen) links fix, Spuren rechts horizontal scrollbar. */
 .tl-grid { display: flex; align-items: stretch; }
