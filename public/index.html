@@ -13,10 +13,27 @@
     <a class="settings-link" href="/programm">⚙ Programm</a>
   </header>
 
-  <!-- Schmaler, mittiger On-Air-Streifen -->
-  <div class="onair-bar" id="onair-bar">
-    <span class="onair-dot"></span>
-    <span class="onair-label">On Air</span>
+  <!-- Schmaler, mittiger On-Air-Streifen (klickbar: Sendung stoppen / fortsetzen) -->
+  <button class="onair-bar" id="onair-bar" type="button" title="Sendung stoppen">
+    <span class="onair-dot" id="onair-dot"></span>
+    <span class="onair-label" id="onair-label">On Air</span>
+    <span class="onair-hint" id="onair-hint">▾ stoppen</span>
+  </button>
+
+  <!-- Stopp-Bestätigung: Slide-to-stop (verhindert versehentliches Stoppen) -->
+  <div id="stop-modal" class="modal hidden">
+    <div class="modal-box">
+      <h3>Sendung komplett stoppen?</h3>
+      <p class="modal-hint">Die Wand wird schwarz. „On Air" lässt sich nicht versehentlich
+        stoppen – zum Bestätigen den Regler ganz nach rechts schieben. Wieder auf Sendung
+        geht über „Go Live" oder erneut hier.</p>
+      <div id="stop-slider" class="slide-confirm">
+        <div class="slide-fill" id="stop-fill"></div>
+        <span class="slide-label">Zum Stoppen schieben →</span>
+        <div class="slide-handle" id="stop-handle">■</div>
+      </div>
+      <div class="modal-actions"><button id="stop-cancel" class="btn ghost">Abbrechen</button></div>
+    </div>
   </div>
 
   <main class="monitor-main">

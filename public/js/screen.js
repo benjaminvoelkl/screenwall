@@ -48,7 +48,7 @@
     ws.addEventListener('message', (ev) => {
       try {
         const msg = JSON.parse(ev.data);
-        if (msg.type === 'state') applyState(msg.state);
+        if (msg.type === 'state') { applyOffAir(msg.offair); applyState(msg.state); }
         else if (msg.type === 'cmd' && msg.cmd === 'seek') seekCurrent(msg.time);
         else if (msg.type === 'cmd' && msg.cmd === 'goto') gotoEntry(msg.itemId, msg.time, msg.progTime);
         else if (msg.type === 'cmd' && msg.cmd === 'pause') previewPause();
@@ -70,11 +70,25 @@
   fetch('/api/state' + (isPreview ? '' : '?view=live'))
     .then((r) => r.json()).then(applyState).catch(() => {});
 
+  // ===== Off Air (Wand komplett gestoppt = schwarz) ======================
+  // Gilt nur für die echte Wand + den Live-Monitor; die Entwurf-Vorschau bleibt
+  // bedienbar (Off Air betrifft nur die Live-Übertragung).
+  let offAirState = false;
+  function applyOffAir(off) {
+    if (viewer === 'preview') return;
+    off = !!off;
+    if (off === offAirState) return;
+    offAirState = off;
+    if (off) { clearTimer(); clearStage(); els.overlays.classList.add('hidden'); }
+    else { els.overlays.classList.remove('hidden'); afterStateRebuild(); }
+  }
+
   // ===== Zustand anwenden =================================================
   function applyState(s) {
     if (!s) return;
     state = s;
     renderOverlays(s.overlays || []);
+    if (offAirState) { els.overlays.classList.add('hidden'); clearTimer(); clearStage(); return; }
     afterStateRebuild();
   }
 
@@ -321,6 +335,7 @@
   // Einen Content in die Bühne bringen (Crossfade) und – auf Wand/Vorschau –
   // das Weiterschalten planen.
   function showContent(entry, opts) {
+    if (offAirState) return; // Off Air: nichts anzeigen
     opts = opts || {};
     const c = entry.content;
     clearTimer();

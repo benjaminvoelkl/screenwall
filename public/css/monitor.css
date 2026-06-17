@@ -41,14 +41,20 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
 }
 .settings-link:hover { border-color: var(--accent); }
 
-/* ===== Schmaler, mittiger On-Air-Streifen ===== */
+/* ===== Schmaler, mittiger On-Air-Streifen (klickbar) ===== */
 .onair-bar {
   display: flex; align-items: center; justify-content: center; gap: 10px;
-  padding: 5px 22px;
+  width: 100%; padding: 6px 22px; border: 0;
   background: #e51f25;
   color: #fff;
-  font-size: 12px;
+  font-size: 12px; cursor: pointer;
+  transition: filter 0.15s;
 }
+.onair-bar:hover { filter: brightness(1.08); }
+.onair-hint { opacity: 0.85; letter-spacing: 0.04em; }
+/* Off Air: grauer Streifen, kein Puls. */
+.onair-bar.off { background: #3a3f4b; color: #c7ccd6; }
+.onair-bar.off .onair-dot { background: #c7ccd6; animation: none; box-shadow: none; }
 .onair-dot {
   width: 8px; height: 8px; border-radius: 50%;
   background: #fff; box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.6);
@@ -105,3 +111,27 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
   color: var(--muted); font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase;
   padding-left: 6px; border-left: 1px solid var(--border);
 }
+
+/* ===== Stopp-Modal + Slide-to-stop ===== */
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 100; }
+.modal.hidden { display: none; }
+.modal-box { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 22px; width: min(560px, 92vw); }
+.modal-box h3 { margin: 0 0 10px; }
+.modal-hint { color: var(--muted); font-size: 13px; margin: 0 0 16px; line-height: 1.5; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+.btn { background: var(--accent); color: #fff; border: none; border-radius: 8px; padding: 10px 16px; font-size: 15px; cursor: pointer; }
+.btn.ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
+
+.slide-confirm {
+  position: relative; width: 100%; height: 60px; border-radius: 999px;
+  background: var(--bg-2); border: 1px solid var(--border); overflow: hidden;
+  user-select: none; touch-action: none;
+}
+.slide-fill { position: absolute; top: 0; left: 0; height: 100%; width: 56px; background: linear-gradient(90deg, #7a1010, #e51f25); border-radius: 999px; }
+.slide-label { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 15px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; pointer-events: none; }
+.slide-handle {
+  position: absolute; top: 4px; left: 4px; width: 52px; height: 52px; border-radius: 50%;
+  background: #e51f25; color: #fff; display: flex; align-items: center; justify-content: center;
+  font-size: 18px; cursor: grab; touch-action: none; box-shadow: 0 2px 10px rgba(229,31,37,0.5); will-change: transform;
+}
+.slide-handle:active { cursor: grabbing; }

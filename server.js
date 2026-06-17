@@ -37,12 +37,14 @@ const HOST = '0.0.0.0';
 const STATE_FILE = join(__dirname, 'state.json'); // Entwurf (von der Steuerung bearbeitet)
 const LIVE_FILE = join(__dirname, 'live.json'); // Veröffentlichter Zustand (Wand/​/screen)
 const UPLOAD_DIR = join(__dirname, 'uploads');
+const THUMB_DIR = join(__dirname, '.thumbs'); // gecachte Video-Keyframes (ffmpeg)
 const PUBLIC_DIR = join(__dirname, 'public');
 
 // Audio-Ziel für die Lautstärkesteuerung (PipeWire/WirePlumber via wpctl).
 const AUDIO_SINK = process.env.AUDIO_SINK || '@DEFAULT_AUDIO_SINK@';
 
 if (!existsSync(UPLOAD_DIR)) mkdirSync(UPLOAD_DIR, { recursive: true });
+if (!existsSync(THUMB_DIR)) mkdirSync(THUMB_DIR, { recursive: true });
 
 // ---------------------------------------------------------------------------
 // Zustands-Modell
@@ -94,6 +96,8 @@ function normalizeContent(c) {
     out.videoMode = c.videoMode === 'duration' ? 'duration' : 'end';
     out.muted = c.muted !== false;
   }
+  // Gemessene Gesamtlänge (per ffprobe beim Upload) – für Timeline-Breite & Keyframes.
+  if (type === 'video' && typeof c.videoDuration === 'number' && c.videoDuration > 0) out.videoDuration = c.videoDuration;
   if (type === 'image' || type === 'video' || type === 'youtube') out.crop = !!c.crop;
   return out;
 }
@@ -382,11 +386,26 @@ function cleanupFile(filename) {
   }
 }
 
+// Videolänge per ffprobe ermitteln (Sekunden; 0 bei Fehler).
+function probeDuration(filename) {
+  return new Promise((resolve) => {
+    execFile('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=nw=1:nk=1', join(UPLOAD_DIR, filename)],
+      { timeout: 15000 }, (err, stdout) => {
+        const d = parseFloat((stdout || '').trim());
+        resolve(isFinite(d) && d > 0 ? d : 0);
+      });
+  });
+}
+
 let state = loadState(); // Entwurf
 let live = loadLive() || structuredClone(state); // Live (Wand)
+// "Off Air": die Wand wird komplett gestoppt (schwarz). Separat gehalten, damit es
+// isDirty() nicht beeinflusst; in live.json als Extra-Schlüssel persistiert.
+let offAir = false;
+try { if (existsSync(LIVE_FILE)) offAir = !!JSON.parse(readFileSync(LIVE_FILE, 'utf8')).offair; } catch (_) {}
 
 function saveState(s = state) { writeFileSync(STATE_FILE, JSON.stringify(s, null, 2)); }
-function saveLive() { writeFileSync(LIVE_FILE, JSON.stringify(live, null, 2)); }
+function saveLive() { writeFileSync(LIVE_FILE, JSON.stringify({ ...live, offair: offAir }, null, 2)); }
 
 // Gibt es unveröffentlichte Änderungen?
 function isDirty() { return JSON.stringify(state) !== JSON.stringify(live); }
@@ -457,6 +476,7 @@ app.get('/api/state', (req, res) => res.json(req.query.view === 'live' ? live : 
 // damit die Wand ab der Cursor-/Playhead-Position der Programm-Timeline weiterläuft.
 app.post('/api/golive', (req, res) => {
   live = structuredClone(state);
+  offAir = false; // Veröffentlichen heißt: wieder auf Sendung
   saveLive();
   broadcast();
   const g = req.body && req.body.goto;
@@ -664,7 +684,7 @@ const upload = multer({
 
 // Datei hochladen und als Content-Item an eine Playlist anhängen.
 // Form-Feld `playlistId` bestimmt das Ziel.
-app.post('/api/upload', upload.single('file'), (req, res) => {
+app.post('/api/upload', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Keine Datei empfangen' });
   const pl = getPlaylist(req.body.playlistId);
   if (!pl) {
@@ -672,10 +692,9 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
     return res.status(400).json({ error: 'Playlist nicht gefunden' });
   }
   const type = req.file.mimetype.startsWith('video/') ? 'video' : 'image';
-  const item = {
-    id: newId(), kind: 'content',
-    content: normalizeContent({ type, filename: req.file.filename, name: req.file.originalname })
-  };
+  const raw = { type, filename: req.file.filename, name: req.file.originalname };
+  if (type === 'video') raw.videoDuration = await probeDuration(req.file.filename); // für Keyframe-Streifen
+  const item = { id: newId(), kind: 'content', content: normalizeContent(raw) };
   pl.items.push(item);
   saveState();
   broadcast();
@@ -749,6 +768,15 @@ app.post('/api/link/recheck', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// "Off Air" setzen/aufheben. Body: { off: true|false }. Stoppt die Wand komplett
+// (schwarz). Wieder auf Sendung geht auch per "Go Live".
+app.post('/api/offair', (req, res) => {
+  offAir = (req.body && typeof req.body.off === 'boolean') ? req.body.off : true;
+  saveLive();
+  broadcast();
+  res.json({ ok: true, offair: offAir });
 });
 
 // ---------------------------------------------------------------------------
@@ -889,6 +917,23 @@ app.get('/api/qr', async (req, res) => {
   }
 });
 
+// --- Video-Keyframe (ffmpeg, gecacht) für den Filmstreifen in der Timeline ---
+app.get('/api/frame', (req, res) => {
+  const file = (req.query.file || '').toString();
+  const t = Math.max(0, parseFloat(req.query.t) || 0);
+  if (!/^[\w.\-]+$/.test(file)) return res.status(400).send('bad file');
+  const src = join(UPLOAD_DIR, file);
+  if (!existsSync(src)) return res.status(404).send('not found');
+  const out = join(THUMB_DIR, `${file}.${Math.round(t)}.jpg`);
+  const send = () => { res.set('Cache-Control', 'public, max-age=86400'); res.sendFile(out); };
+  if (existsSync(out)) return send();
+  execFile('ffmpeg', ['-ss', String(t), '-i', src, '-frames:v', '1', '-vf', 'scale=320:-1', '-q:v', '5', '-y', out],
+    { timeout: 20000 }, (err) => {
+      if (err || !existsSync(out)) return res.status(500).send('frame error');
+      send();
+    });
+});
+
 // --- Externer Abruf-Proxy (für dynamische Elemente; umgeht CORS) ------------
 // Phase-1-Grundgerüst für Wetter/Newsfeeds. Vollständige API folgt in Phase 2.
 app.get('/api/fetch', async (req, res) => {
@@ -915,8 +960,8 @@ app.get('/api/fetch', async (req, res) => {
 const wss = new WebSocketServer({ server });
 
 function broadcast() {
-  const draftMsg = JSON.stringify({ type: 'state', state, dirty: isDirty() });
-  const liveMsg = JSON.stringify({ type: 'state', state: live });
+  const draftMsg = JSON.stringify({ type: 'state', state, dirty: isDirty(), offair: offAir });
+  const liveMsg = JSON.stringify({ type: 'state', state: live, offair: offAir });
   for (const client of wss.clients) {
     if (client.readyState === client.OPEN) client.send(client.isWall ? liveMsg : draftMsg);
   }
@@ -939,8 +984,8 @@ wss.on('connection', (ws, req) => {
   ws.isWall = role !== 'preview' && role !== 'control';
 
   ws.send(ws.isWall
-    ? JSON.stringify({ type: 'state', state: live })
-    : JSON.stringify({ type: 'state', state, dirty: isDirty() }));
+    ? JSON.stringify({ type: 'state', state: live, offair: offAir })
+    : JSON.stringify({ type: 'state', state, dirty: isDirty(), offair: offAir }));
   if ((ws.role === 'control' || ws.role === 'monitor') && liveNowPlaying) {
     ws.send(JSON.stringify({ type: 'cmd', cmd: 'nowplaying', ...liveNowPlaying }));
   }

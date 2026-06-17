@@ -92,7 +92,7 @@
 
   function blockDur(itemId, c) {
     if ((c.type === 'video' || c.type === 'youtube') && c.videoMode !== 'duration') {
-      return measured[itemId] || NOMINAL_END;
+      return measured[itemId] || c.videoDuration || NOMINAL_END;
     }
     return Math.max(1, c.durationSec || 6);
   }
@@ -181,6 +181,7 @@
       if (c.type === 'color') el.style.background = c.color || '#000';
       else if (c.type === 'image') el.style.backgroundImage = `url('/uploads/${c.filename}')`;
       else if (c.type === 'youtube') el.style.backgroundImage = `url('https://i.ytimg.com/vi/${c.videoId}/mqdefault.jpg')`;
+      else if (c.type === 'video' && c.filename) el.appendChild(buildFilmstrip(c.filename, b.dur));
       if ((c.type === 'video' || c.type === 'youtube') && c.videoMode !== 'duration') el.classList.add('end-video');
 
       const badge = document.createElement('span');
@@ -202,6 +203,25 @@
 
       lane.appendChild(el);
     }
+  }
+
+  // Filmstreifen: bei (langen) Videos alle ~60s ein Keyframe als Vorschaubild.
+  function buildFilmstrip(filename, dur) {
+    const FRAME_INTERVAL = 60; // alle X Sekunden ein Keyframe
+    const MAXF = 40;
+    const count = Math.min(MAXF, Math.max(1, Math.round((dur || 0) / FRAME_INTERVAL)));
+    const strip = document.createElement('div');
+    strip.className = 'tl-filmstrip';
+    const step = (dur || 0) / count;
+    for (let i = 0; i < count; i++) {
+      const img = document.createElement('img');
+      img.className = 'tl-frame'; img.loading = 'lazy'; img.alt = '';
+      img.style.left = (i / count * 100) + '%';
+      img.style.width = (100 / count) + '%';
+      img.src = `/api/frame?file=${encodeURIComponent(filename)}&t=${Math.round(i * step + step / 2)}`;
+      strip.appendChild(img);
+    }
+    return strip;
   }
 
   // Eine Lane (+ Gutter-Label) pro Overlay; jeder Clip ist verschiebbar (start),
