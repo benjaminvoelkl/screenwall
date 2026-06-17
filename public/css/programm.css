@@ -43,6 +43,9 @@
   font-size: 15px; line-height: 1; padding: 7px 12px; border-radius: 8px; cursor: pointer;
 }
 .tl-tbtn:hover { border-color: var(--accent); }
+.tl-tbtn.tl-live { color: #ff6b6b; border-color: #5a2a2a; }
+.tl-tbtn.tl-live:hover { border-color: #ff3b30; background: #241a1c; }
+.tl-tbtn.hidden { display: none; }
 .tl-zoom { display: flex; align-items: center; gap: 8px; }
 .tl-zoom input[type="range"] { width: 160px; accent-color: var(--accent); cursor: pointer; }
 .tl-zoom-end { font-size: 11px; color: var(--muted); letter-spacing: 0.02em; }

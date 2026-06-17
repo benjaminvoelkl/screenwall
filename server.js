@@ -453,11 +453,16 @@ app.get('/overlay', (req, res) => {
 // Aktuellen Zustand holen. `?view=live` liefert den veröffentlichten Zustand.
 app.get('/api/state', (req, res) => res.json(req.query.view === 'live' ? live : state));
 
-// "Go Live": den Entwurf veröffentlichen.
+// "Go Live": den Entwurf veröffentlichen. Optional `{ goto: { itemId, time, progTime } }`,
+// damit die Wand ab der Cursor-/Playhead-Position der Programm-Timeline weiterläuft.
 app.post('/api/golive', (req, res) => {
   live = structuredClone(state);
   saveLive();
   broadcast();
+  const g = req.body && req.body.goto;
+  if (g && typeof g.itemId === 'string') {
+    sendToWall({ type: 'cmd', cmd: 'goto', itemId: g.itemId, time: g.time || 0, progTime: g.progTime || 0 });
+  }
   res.json({ ok: true });
 });
 
@@ -914,6 +919,14 @@ function broadcast() {
   const liveMsg = JSON.stringify({ type: 'state', state: live });
   for (const client of wss.clients) {
     if (client.readyState === client.OPEN) client.send(client.isWall ? liveMsg : draftMsg);
+  }
+}
+
+// Kommando nur an die echte Wand senden (nicht an Monitore/Vorschauen).
+function sendToWall(msg) {
+  const s = JSON.stringify(msg);
+  for (const client of wss.clients) {
+    if (client.isWall && client.role !== 'monitor' && client.readyState === client.OPEN) client.send(s);
   }
 }
 

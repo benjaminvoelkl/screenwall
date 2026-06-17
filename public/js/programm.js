@@ -14,6 +14,8 @@
   let total = 0;                      // Gesamtdauer in Sekunden
   let pxPerSec = 12;
   let playheadT = 0;                  // Playhead-Position in Sekunden
+  let mode = 'live';                  // 'live' = Wand spiegeln | 'draft' = Entwurf-Vorschau
+  let liveProg = { t: 0, ts: 0 };     // letzter Programmzeit-Stand der Wand (für Live-Playhead)
   const measured = {};                // itemId -> gemessene Dauer (für "bis Ende"-Videos)
 
   const NOMINAL_END = 30;            // angenommene Dauer für Videos ohne feste Dauer
@@ -34,6 +36,7 @@
           render();
         } else if (msg.type === 'cmd' && msg.cmd === 'nowplaying') {
           liveNowPlaying = msg;
+          if (typeof msg.progTime === 'number') liveProg = { t: msg.progTime, ts: performance.now() };
           applyLiveNow();
         }
       } catch (_) {}
@@ -51,12 +54,13 @@
   connect();
   fetch('/api/state').then((r) => r.json()).then((s) => { state = s; render(); });
 
-  // ---- Entwurf-Vorschau laden (Sicht 'preview' in screen.js) --------------
-  $('prev-frame').src = '/screen';
+  // ---- Vorschau-Modus: Live-Spiegel (Wand) <-> Entwurf-Vorschau -----------
+  // Standard = Live-Spiegel (Sicht 'monitor', /screen?view=live): zeigt die echte
+  // Wand und bleibt nach F5 synchron. Beim Scrubben/Bearbeiten wechselt die
+  // Vorschau in den Entwurf-Modus (Sicht 'preview'). Initialisierung am Dateiende.
 
-  // Vorschau meldet laufend ihre Position (itemId + Zeit, auch für statische
-  // Inhalte). Damit folgt der Playhead der Wiedergabe und die echte Dauer von
-  // "bis Ende"-Videos wird übernommen (Block nachskalieren).
+  // Im Entwurf-Modus meldet die Vorschau laufend ihre Position (itemId + Zeit) und
+  // der Playhead folgt; im Live-Modus folgt der Playhead der Wand (nowplaying).
   let scrubbing = false;
   window.addEventListener('message', (e) => {
     const d = e.data;
@@ -306,8 +310,8 @@
     const px = playheadT * pxPerSec;
     $('tl-playhead').style.left = px + 'px';
     $('prog-clock').textContent = `${fmtClock(playheadT)} / ${fmtClock(total)}`;
-    // Playhead bei laufender Wiedergabe im Sichtbereich halten.
-    if (playing && !scrubbing) {
+    // Playhead im Sichtbereich halten (außer der Nutzer zieht gerade selbst).
+    if (!scrubbing) {
       const sc = $('tl-scroll');
       if (px < sc.scrollLeft + 30 || px > sc.scrollLeft + sc.clientWidth - 30) {
         sc.scrollLeft = Math.max(0, px - sc.clientWidth / 2);
@@ -333,7 +337,7 @@
   let lastSent = 0;
   function sendGoto(T) {
     const e = entryAt(T);
-    if (e) wsSend({ type: 'cmd', cmd: 'goto', itemId: e.itemId, time: e.offset });
+    if (e) wsSend({ type: 'cmd', cmd: 'goto', itemId: e.itemId, time: e.offset, progTime: T });
   }
   function scrubTo(T, opts) {
     opts = opts || {};
@@ -348,6 +352,7 @@
     const tracks = $('tl-tracks');
     const timeAt = (clientX) => (clientX - tracks.getBoundingClientRect().left) / pxPerSec;
     tracks.addEventListener('pointerdown', (e) => {
+      if (mode === 'live') setPreviewMode('draft'); // Scrubben = Entwurf-Vorschau
       scrubbing = true; tracks.setPointerCapture(e.pointerId);
       scrubTo(timeAt(e.clientX));
     });
@@ -384,20 +389,48 @@
     scalePreview($('golive-stage'), $('golive-frame-wrap'), window.innerWidth * 0.9, window.innerHeight * 0.62);
   }
   requestAnimationFrame(scaleInlinePreview);
+  setPreviewMode('live'); // Start als Live-Spiegel der Wand (F5-fest); dirty -> Entwurf
 
-  // ===== Wiedergabe (Play/Pause) ===========================================
-  let playing = true; // Vorschau startet selbstständig
+  // ===== Vorschau-Modus (Live-Spiegel <-> Entwurf) =========================
+  function setPreviewMode(m) {
+    const changed = m !== mode || !$('prev-frame').src;
+    mode = m;
+    if (changed) $('prev-frame').src = m === 'live' ? '/screen?view=live' : '/screen';
+    $('tl-transport').style.display = m === 'draft' ? '' : 'none';
+    $('tl-live').classList.toggle('hidden', m === 'live');
+    $('prog-mode').textContent = m === 'live' ? 'Live-Vorschau (Wand)' : 'Entwurf-Vorschau – am Zeitstrahl scrubben';
+    if (m === 'draft' && changed) seedDraftToPlayhead();
+  }
+  // Nach Moduswechsel die (neu ladende) Entwurf-Vorschau auf den Playhead setzen.
+  function seedDraftToPlayhead() {
+    const e = entryAt(playheadT); if (!e) return;
+    [300, 900, 1600].forEach((d) => setTimeout(() => {
+      if (mode === 'draft') wsSend({ type: 'cmd', cmd: 'goto', itemId: e.itemId, time: e.offset, progTime: playheadT });
+    }, d));
+  }
+  $('tl-live').addEventListener('click', () => { positioned = false; updateGoLive(); setPreviewMode('live'); });
+
+  // Live-Modus: Playhead folgt der Wand (nowplaying.progTime, lokal interpoliert).
+  setInterval(() => {
+    if (mode === 'live' && !scrubbing && liveProg.ts) {
+      playheadT = Math.min(total, liveProg.t + (performance.now() - liveProg.ts) / 1000);
+      positionPlayhead();
+    }
+  }, 200);
+
+  // ===== Wiedergabe (Play/Pause – nur im Entwurf-Modus) ====================
+  let playing = true;
   function setPlaying(p) {
     playing = p;
     $('tl-play').textContent = p ? '⏸' : '▶';
     $('tl-play').title = p ? 'Pause (Leertaste)' : 'Abspielen (Leertaste)';
     wsSend({ type: 'cmd', cmd: p ? 'play' : 'pause' });
   }
-  function togglePlay() { setPlaying(!playing); }
+  function togglePlay() { if (mode === 'draft') setPlaying(!playing); }
   $('tl-play').addEventListener('click', togglePlay);
   $('tl-to-start').addEventListener('click', () => scrubTo(0));
   document.addEventListener('keydown', (e) => {
-    if (e.code !== 'Space') return;
+    if (e.code !== 'Space' || mode !== 'draft') return;
     const t = e.target;
     if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
     if (!$('golive-modal').classList.contains('hidden')) return;
@@ -407,7 +440,12 @@
 
   // ===== Go Live ===========================================================
   let dirtyState = false, positioned = false;
-  function setDirty(dirty) { dirtyState = dirty; updateGoLive(); }
+  function setDirty(dirty) {
+    const became = dirty && !dirtyState;
+    dirtyState = dirty;
+    if (became && mode === 'live') setPreviewMode('draft'); // Bearbeitung -> Entwurf-Vorschau
+    updateGoLive();
+  }
   function updateGoLive() {
     const live = $('go-live');
     const show = dirtyState || positioned;
@@ -423,9 +461,9 @@
     resetSlide();
     scaleGolivePreview();
     requestAnimationFrame(scaleGolivePreview);
-    // Vorschau ab Playhead-Punkt starten, sobald das Iframe verbunden ist.
+    // Modal-Vorschau ab Playhead-Punkt starten, sobald das Iframe verbunden ist.
     const e = entryAt(playheadT);
-    if (e) setTimeout(() => wsSend({ type: 'cmd', cmd: 'goto', itemId: e.itemId, time: e.offset }), 1200);
+    if (e) setTimeout(() => wsSend({ type: 'cmd', cmd: 'goto', itemId: e.itemId, time: e.offset, progTime: playheadT }), 1200);
   }
   function closeGoLive() {
     $('golive-modal').classList.add('hidden');
@@ -456,8 +494,13 @@
     if (slideDone) return;
     slideDone = true;
     setSlide(slideTravel());
-    try { await fetch('/api/golive', { method: 'POST' }); } catch (_) {}
-    location.href = '/';
+    // Wand ab dem Cursor (Playhead) starten: Position mitgeben.
+    const e = entryAt(playheadT);
+    const body = e ? { goto: { itemId: e.itemId, time: e.offset, progTime: playheadT } } : {};
+    try { await fetch('/api/golive', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); } catch (_) {}
+    closeGoLive();
+    positioned = false;
+    setPreviewMode('live'); // jetzt ist Entwurf = Live -> Live-Spiegel zeigen
   }
   (function bindSlide() {
     const handle = $('slide-handle');

@@ -25,7 +25,7 @@
     <!-- Live-Vorschau des Entwurfs (folgt dem Playhead beim Scrubben) -->
     <section class="prog-preview">
       <div class="preview-head">
-        <span>Live-Vorschau (Entwurf) – am Zeitstrahl scrubben</span>
+        <span id="prog-mode">Live-Vorschau (Wand)</span>
         <span id="prog-clock" class="prog-clock">0:00 / 0:00</span>
       </div>
       <div id="prev-stage" class="preview-stage">
@@ -39,7 +39,8 @@
     <!-- Zeitstrahl mit parallelen Spuren -->
     <section class="timeline">
       <div class="tl-toolbar">
-        <span class="tl-transport">
+        <button id="tl-live" class="tl-tbtn tl-live hidden" title="Zur Live-Ansicht (Wand spiegeln)">● Zur Live-Ansicht</button>
+        <span class="tl-transport" id="tl-transport">
           <button id="tl-to-start" class="tl-tbtn" title="Zum Anfang">⏮</button>
           <button id="tl-play" class="tl-tbtn" title="Pause (Leertaste)">⏸</button>
         </span>
