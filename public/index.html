@@ -11,12 +11,9 @@
 <body>
   <header class="topbar">
     <h1>Screenwall</h1>
-    <div class="status">
-      <span id="conn-dot" class="dot"></span>
-      <span id="conn-text">verbinde…</span>
-      <button id="preview-open" class="btn">▦ Live-Vorschau</button>
-      <a class="screen-link" href="/screen" target="_blank">/screen öffnen ↗</a>
-    </div>
+    <button id="preview-open" class="onair" title="Live-Vorschau des Displays">
+      <span class="onair-dot"></span>On Air
+    </button>
   </header>
 
   <nav class="modes">
@@ -216,6 +213,14 @@
         (z.&nbsp;B. Google, YouTube-Startseite) verbieten die Einbettung und bleiben dann leer.</p>
     </section>
   </main>
+
+  <footer class="footer">
+    <span class="status">
+      <span id="conn-dot" class="dot"></span>
+      <span id="conn-text">verbinde…</span>
+    </span>
+    <a class="screen-link" href="/screen" target="_blank">/screen öffnen ↗</a>
+  </footer>
 
   <!-- Live-Vorschau des Displays (eingebettetes /screen, maßstabsgetreu 18:16) -->
   <div id="preview-modal" class="modal hidden">

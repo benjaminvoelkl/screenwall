@@ -119,13 +119,19 @@
   // Bettet /screen in der echten Display-Auflösung (2× 4K hochkant = 4320×3840,
   // 18:16) als Iframe ein und verkleinert es maßstabsgetreu auf die Modalgröße.
   // /screen verbindet sich selbst per WebSocket → Vorschau ist automatisch live.
-  const PREVIEW_W = 4320, PREVIEW_H = 3840;
+  const PREVIEW_W = 4320, PREVIEW_H = 3840; // echte Wandfläche (18:16)
   function scalePreview() {
     const stage = $('preview-stage');
     const wrap = $('preview-frame-wrap');
     if (!stage || stage.offsetParent === null) return;
-    const scale = Math.min(stage.clientWidth / PREVIEW_W, stage.clientHeight / PREVIEW_H);
-    wrap.style.transform = `translate(-50%, -50%) scale(${scale})`;
+    // In den verfügbaren Platz einpassen (Rand für Kopf/Leiste lassen).
+    const availW = window.innerWidth * 0.92;
+    const availH = window.innerHeight * 0.74;
+    const scale = Math.max(0.01, Math.min(availW / PREVIEW_W, availH / PREVIEW_H));
+    // Stage exakt auf die skalierte 18:16-Größe -> keine schwarzen Ränder.
+    stage.style.width = Math.round(PREVIEW_W * scale) + 'px';
+    stage.style.height = Math.round(PREVIEW_H * scale) + 'px';
+    wrap.style.transform = `scale(${scale})`;
   }
   function openPreview() {
     $('preview-frame').src = '/screen';
