@@ -115,6 +115,94 @@
   $('crop-confirm').addEventListener('click', () => cropResolve && cropResolve(true));
   $('crop-cancel').addEventListener('click', () => cropResolve && cropResolve(false));
 
+  // ---- Live-Vorschau ------------------------------------------------------
+  // Bettet /screen in der echten Display-Auflösung (2× 4K hochkant = 4320×3840,
+  // 18:16) als Iframe ein und verkleinert es maßstabsgetreu auf die Modalgröße.
+  // /screen verbindet sich selbst per WebSocket → Vorschau ist automatisch live.
+  const PREVIEW_W = 4320, PREVIEW_H = 3840;
+  function scalePreview() {
+    const stage = $('preview-stage');
+    const wrap = $('preview-frame-wrap');
+    if (!stage || stage.offsetParent === null) return;
+    const scale = Math.min(stage.clientWidth / PREVIEW_W, stage.clientHeight / PREVIEW_H);
+    wrap.style.transform = `translate(-50%, -50%) scale(${scale})`;
+  }
+  function openPreview() {
+    $('preview-frame').src = '/screen';
+    $('preview-modal').classList.remove('hidden');
+    scalePreview();
+    // Erneut nach dem Layout-Pass, falls die Stage-Höhe (aspect-ratio) erst
+    // jetzt feststeht.
+    requestAnimationFrame(scalePreview);
+  }
+  function closePreview() {
+    $('preview-modal').classList.add('hidden');
+    $('preview-frame').src = ''; // Verbindung/Playback der Vorschau beenden
+    resetSeekBar();
+  }
+  $('preview-open').addEventListener('click', openPreview);
+  $('preview-close').addEventListener('click', closePreview);
+  $('preview-modal').addEventListener('click', (e) => {
+    if (e.target === $('preview-modal')) closePreview(); // Klick auf Backdrop
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !$('preview-modal').classList.contains('hidden')) closePreview();
+  });
+  window.addEventListener('resize', scalePreview);
+
+  // ---- Positionsleiste der Vorschau ---------------------------------------
+  // Die eingebettete /screen-Instanz meldet ihre Wiedergabeposition per
+  // postMessage. Beim Ziehen wird ein Seek-Befehl gesendet, der über den
+  // Server an Wand UND Vorschau geht -> beide springen synchron.
+  let seeking = false;
+  let lastSeekSent = 0;
+
+  function fmtTime(s) {
+    s = Math.max(0, Math.floor(s || 0));
+    return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  }
+  function sendSeek(time) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'cmd', cmd: 'seek', time }));
+    }
+  }
+  function updateSeekBar(pos) {
+    const bar = $('preview-seek'), label = $('preview-time');
+    if (!pos || !pos.duration) {
+      bar.disabled = true; bar.value = 0; label.textContent = '–';
+      return;
+    }
+    bar.disabled = false;
+    if (!seeking) {
+      bar.max = Math.floor(pos.duration);
+      bar.value = Math.floor(pos.time);
+      label.textContent = `${fmtTime(pos.time)} / ${fmtTime(pos.duration)}`;
+    }
+  }
+  function resetSeekBar() {
+    seeking = false;
+    const bar = $('preview-seek');
+    bar.disabled = true; bar.value = 0;
+    $('preview-time').textContent = '–';
+  }
+
+  window.addEventListener('message', (e) => {
+    const d = e.data;
+    if (!d || d.type !== 'screen-pos') return;
+    if (e.source !== $('preview-frame').contentWindow) return;
+    updateSeekBar(d.pos);
+  });
+
+  const seekBar = $('preview-seek');
+  seekBar.addEventListener('pointerdown', () => { seeking = true; });
+  seekBar.addEventListener('input', () => {
+    const t = Number(seekBar.value);
+    $('preview-time').textContent = `${fmtTime(t)} / ${fmtTime(Number(seekBar.max))}`;
+    const now = Date.now();
+    if (now - lastSeekSent > 150) { sendSeek(t); lastSeekSent = now; } // live mitziehen
+  });
+  seekBar.addEventListener('change', () => { sendSeek(Number(seekBar.value)); seeking = false; });
+
   async function deleteMedia(id) {
     await fetch(`/api/media/${id}`, { method: 'DELETE' });
   }

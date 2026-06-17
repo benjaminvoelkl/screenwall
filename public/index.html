@@ -14,6 +14,7 @@
     <div class="status">
       <span id="conn-dot" class="dot"></span>
       <span id="conn-text">verbinde…</span>
+      <button id="preview-open" class="btn">▦ Live-Vorschau</button>
       <a class="screen-link" href="/screen" target="_blank">/screen öffnen ↗</a>
     </div>
   </header>
@@ -215,6 +216,27 @@
         (z.&nbsp;B. Google, YouTube-Startseite) verbieten die Einbettung und bleiben dann leer.</p>
     </section>
   </main>
+
+  <!-- Live-Vorschau des Displays (eingebettetes /screen, maßstabsgetreu 18:16) -->
+  <div id="preview-modal" class="modal hidden">
+    <div class="preview-box">
+      <div class="preview-head">
+        <span>Live-Vorschau · 4320×3840 (18:16, 2× 4K hochkant)</span>
+        <button id="preview-close" class="btn ghost">Schließen</button>
+      </div>
+      <div id="preview-stage" class="preview-stage">
+        <div id="preview-frame-wrap" class="preview-frame-wrap">
+          <iframe id="preview-frame" title="Live-Vorschau"
+                  allow="autoplay; encrypted-media; fullscreen; picture-in-picture"></iframe>
+        </div>
+      </div>
+      <div class="preview-controls">
+        <input type="range" id="preview-seek" min="0" max="1000" value="0" step="1" disabled />
+        <span id="preview-time" class="preview-time">–</span>
+      </div>
+      <p class="hint">Positionsleiste springt auf Wand <em>und</em> Vorschau an dieselbe Stelle (Diashow-Videos &amp; YouTube).</p>
+    </div>
+  </div>
 
   <!-- Crop-Dialog -->
   <div id="crop-modal" class="modal hidden">

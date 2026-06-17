@@ -21,6 +21,9 @@
   };
 
   let current = null; // letzter Zustand
+  // Läuft /screen eingebettet in der Live-Vorschau? Dann synchronisiert es sich
+  // zur echten Wand (statt selbst bei null zu starten) und meldet seine Position.
+  const embedded = !!(window.parent && window.parent !== window);
 
   // ---- WebSocket mit Auto-Reconnect --------------------------------------
   let ws = null;
@@ -37,6 +40,11 @@
       try {
         const msg = JSON.parse(ev.data);
         if (msg.type === 'state') applyState(msg.state);
+        else if (msg.type === 'cmd' && msg.cmd === 'seek') seekCurrent(msg.time);
+        // Wand meldet, was gerade läuft -> Vorschau springt dorthin.
+        else if (msg.type === 'cmd' && msg.cmd === 'nowplaying') { if (embedded) applyNowPlaying(msg); }
+        // Vorschau fragt beim Start -> Wand antwortet sofort mit ihrer Position.
+        else if (msg.type === 'cmd' && msg.cmd === 'sync-request') { if (!embedded) sendNowPlaying(); }
       } catch (_) { /* ignorieren */ }
     });
     ws.addEventListener('close', () => {
@@ -153,6 +161,7 @@
       if (changed || justEntered) {
         build();
         idx = 0;
+        syncedMediaId = '';
         show(0);
         schedule();
       } else {
@@ -235,7 +244,43 @@
       });
     }
 
-    return { update, stop };
+    function activeVideo() {
+      const active = slidesEls()[idx];
+      return active ? active.querySelector('video') : null;
+    }
+    function seek(t) {
+      const v = activeVideo();
+      if (v) { try { v.currentTime = t; v.play().catch(() => {}); } catch (_) {} }
+    }
+    function getPos() {
+      const v = activeVideo();
+      if (v && isFinite(v.duration) && v.duration > 0) {
+        return { time: v.currentTime, duration: v.duration };
+      }
+      return null;
+    }
+
+    // Welches Medium läuft gerade an welcher Stelle? (für den Wand-Heartbeat)
+    function nowPlaying() {
+      const m = media[idx];
+      if (!m) return null;
+      const v = activeVideo();
+      return { mediaId: m.id, time: v ? v.currentTime : 0 };
+    }
+
+    // Auf das Medium + die Position der Wand springen (nur in der Vorschau).
+    let syncedMediaId = '';
+    function syncTo(mediaId, time) {
+      if (mediaId === syncedMediaId) return;
+      const i = media.findIndex((m) => m.id === mediaId);
+      if (i < 0) return;
+      syncedMediaId = mediaId;
+      if (i !== idx) { idx = i; show(idx); schedule(); }
+      const v = activeVideo();
+      if (v && time > 0) { try { v.currentTime = time; v.play().catch(() => {}); } catch (_) {} }
+    }
+
+    return { update, stop, seek, getPos, nowPlaying, syncTo };
   })();
 
   // ---- Modus 2: YouTube (IFrame API) --------------------------------------
@@ -298,6 +343,7 @@
       else { try { player.unMute(); } catch (_) {} }
       if (restart) {
         idx = 0;
+        syncedVideoId = '';
         load();
         started = true;
       }
@@ -325,7 +371,44 @@
       started = false;
     }
 
-    return { update, stop };
+    function seek(t) {
+      try { if (ready && player && player.seekTo) { player.seekTo(t, true); player.playVideo(); } } catch (_) {}
+    }
+    function getPos() {
+      try {
+        if (ready && player && player.getDuration) {
+          const d = player.getDuration();
+          if (d > 0) return { time: player.getCurrentTime(), duration: d };
+        }
+      } catch (_) {}
+      return null;
+    }
+
+    // Welches Video läuft gerade an welcher Stelle? (für den Wand-Heartbeat)
+    function nowPlaying() {
+      if (!ready || !player || !videos[idx]) return null;
+      let time = 0;
+      try { time = player.getCurrentTime ? player.getCurrentTime() : 0; } catch (_) {}
+      return { videoId: videos[idx].videoId, time };
+    }
+
+    // Auf das Video + die Position der Wand springen (nur in der Vorschau).
+    // Springt pro Video nur einmal -> kein ständiges Nachseeken/Ruckeln.
+    let syncedVideoId = '';
+    function syncTo(videoId, time) {
+      if (!ready || !player || videoId === syncedVideoId) return;
+      const i = videos.findIndex((v) => v.videoId === videoId);
+      if (i < 0) return;
+      syncedVideoId = videoId;
+      idx = i;
+      try {
+        player.loadVideoById({ videoId, startSeconds: Math.max(0, time || 0) });
+        if (muted) player.mute();
+        player.playVideo();
+      } catch (_) {}
+    }
+
+    return { update, stop, seek, getPos, nowPlaying, syncTo };
   })();
 
   // ---- Modus 3: Link (Webseiten im Vollbild, rotierend) -------------------
@@ -392,6 +475,54 @@
 
     return { update, stop };
   })();
+
+  // ---- Video-Seek (Befehl aus der Live-Vorschau) --------------------------
+  // Seekt das aktuell laufende Video. Da der Befehl an alle Clients geht,
+  // springen Wand und Vorschau gleichzeitig -> synchron.
+  function seekCurrent(time) {
+    const mode = current && current.mode;
+    if (mode === 'slideshow') Slideshow.seek(time);
+    else if (mode === 'youtube') YT.seek(time);
+  }
+
+  // ---- Synchronisierung Wand <-> Vorschau ---------------------------------
+  // Die echte Wand sendet laufend, welches Video an welcher Stelle läuft.
+  function sendNowPlaying() {
+    if (embedded || !ws || ws.readyState !== WebSocket.OPEN) return;
+    const mode = current && current.mode;
+    let np = null;
+    if (mode === 'youtube') np = YT.nowPlaying();
+    else if (mode === 'slideshow') np = Slideshow.nowPlaying();
+    if (np) ws.send(JSON.stringify({ type: 'cmd', cmd: 'nowplaying', mode, ...np }));
+  }
+  // Die Vorschau springt auf die gemeldete Position der Wand.
+  function applyNowPlaying(np) {
+    if (np.mode !== (current && current.mode)) return;
+    if (np.mode === 'youtube') YT.syncTo(np.videoId, np.time);
+    else if (np.mode === 'slideshow') Slideshow.syncTo(np.mediaId, np.time);
+  }
+  function requestSync() {
+    if (embedded && ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'cmd', cmd: 'sync-request' }));
+    }
+  }
+
+  if (embedded) {
+    // Vorschau: aktuelle Position an die Positionsleiste der Steuerung melden
+    // und bei Bedarf einen sofortigen Sync von der Wand anfordern.
+    setInterval(() => {
+      const mode = current && current.mode;
+      let pos = null;
+      if (mode === 'slideshow') pos = Slideshow.getPos();
+      else if (mode === 'youtube') pos = YT.getPos();
+      window.parent.postMessage({ type: 'screen-pos', mode, pos }, '*');
+    }, 250);
+    requestSync();
+    setInterval(requestSync, 2000); // bis die Wand antwortet / bei Modeswechsel
+  } else {
+    // Wand: laufender Heartbeat, damit neu geöffnete Vorschauen aufspringen.
+    setInterval(sendNowPlaying, 1000);
+  }
 
   // ---- Mauszeiger nach Inaktivität ausblenden -----------------------------
   let idleTimer = null;

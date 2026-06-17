@@ -518,6 +518,19 @@ function broadcast() {
 wss.on('connection', (ws) => {
   // Beim Verbinden sofort den aktuellen Zustand senden.
   ws.send(JSON.stringify({ type: 'state', state }));
+
+  // Befehle (z. B. Video-Seek aus der Live-Vorschau) an alle Clients
+  // weiterreichen, damit Wand und Vorschau gleichzeitig springen. Diese
+  // Befehle sind flüchtig und werden nicht im Zustand persistiert.
+  ws.on('message', (data) => {
+    let msg;
+    try { msg = JSON.parse(data.toString()); } catch (_) { return; }
+    if (!msg || msg.type !== 'cmd') return;
+    const out = JSON.stringify(msg);
+    for (const client of wss.clients) {
+      if (client.readyState === client.OPEN) client.send(out);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
