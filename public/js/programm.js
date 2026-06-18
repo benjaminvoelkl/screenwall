@@ -119,7 +119,9 @@
   const MAX_DETAIL_PX = 60;
   function fitPxPerSec() {
     const avail = $('tl-scroll').clientWidth - 8;
-    return total > 0 ? Math.max(0.5, avail / total) : MAX_DETAIL_PX;
+    // Untergrenze nur gegen 0/negativ – sonst würde der Floor lange Timelines
+    // (z. B. ~220 min) am Einpassen hindern und "Alles" zeigte nur einen Ausschnitt.
+    return total > 0 ? Math.max(0.01, avail / total) : MAX_DETAIL_PX;
   }
   function zoomPxPerSec() {
     const v = Number($('tl-zoom').value);

@@ -92,11 +92,12 @@ html, body {
 .go-live {
   display: inline-flex; align-items: center; gap: 8px;
   padding: 9px 18px; border-radius: 999px;
-  border: 1px solid var(--border); background: var(--panel-2);
-  color: var(--muted); font-size: 14px; font-weight: 700;
+  border: 1px solid #2ea043; background: #1f7a34;
+  color: #fff; font-size: 14px; font-weight: 700;
   letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer;
   transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s;
 }
+.go-live:hover { background: #248239; }
 .go-live:disabled { cursor: default; opacity: 0.85; }
 .go-live.pending {
   background: #1f7a34; border-color: #2ea043; color: #fff; opacity: 1;
