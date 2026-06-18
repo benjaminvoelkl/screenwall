@@ -127,6 +127,18 @@
     ids.splice(i, 1); ids.splice(j, 0, id);
     await api('POST', '/api/overlays/order', { order: ids });
   }
+  // Z-Ordnung eines Elements innerhalb seines Overlays (Array-Ende = Vordergrund).
+  // dir > 0 verschiebt nach vorn, edge=true bis ganz vorn/hinten.
+  async function moveElZ(dir, edge) {
+    const o = selOverlay(), e = selElement(); if (!o || !e) return;
+    const ids = o.elements.map((x) => x.id);
+    const i = ids.indexOf(e.id); if (i < 0) return;
+    let j = edge ? (dir > 0 ? ids.length - 1 : 0) : i + dir;
+    j = Math.max(0, Math.min(ids.length - 1, j));
+    if (j === i) return;
+    ids.splice(i, 1); ids.splice(j, 0, e.id);
+    await api('POST', `/api/overlay/${o.id}/elements/order`, { order: ids });
+  }
 
   // ---- Element-Liste ------------------------------------------------------
   const EL_LABEL = { text: 'Text', image: 'Bild', qr: 'QR-Code', shape: 'Fläche' };
@@ -256,6 +268,17 @@
       g.appendChild(field('JSON-Pfad', textInput(src.jsonPath || '', (v) => patchEl({ source: { ...src, kind: 'url', jsonPath: v } }))));
       box.appendChild(g);
     }
+
+    // Z-Ordnung innerhalb des Overlays (Vorder-/Hintergrund)
+    box.appendChild(hr());
+    const zcap = el('div', 'ed-cap'); zcap.textContent = 'Reihenfolge';
+    box.appendChild(zcap);
+    const z = el('div', 'ed-row');
+    z.appendChild(btn('▲ Vordergrund', 'tiny', () => moveElZ(+1)));
+    z.appendChild(btn('▼ Hintergrund', 'tiny ghost', () => moveElZ(-1)));
+    z.appendChild(btn('⤒ ganz vorn', 'tiny', () => moveElZ(+1, true)));
+    z.appendChild(btn('⤓ ganz hinten', 'tiny ghost', () => moveElZ(-1, true)));
+    box.appendChild(z);
 
     box.appendChild(hr());
     box.appendChild(btn('Element löschen', 'tiny ghost', async () => {
