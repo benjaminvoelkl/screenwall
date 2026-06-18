@@ -77,6 +77,10 @@
     if (name === null) return;
     await api('POST', `/api/playlist/${pl.id}/rename`, { name });
   });
+  $('pl-desc').addEventListener('change', () => {
+    const pl = selPl();
+    if (pl) api('POST', `/api/playlist/${pl.id}/rename`, { description: $('pl-desc').value });
+  });
   $('pl-clone').addEventListener('click', async () => {
     const pl = selPl();
     if (!pl) return;
@@ -231,6 +235,7 @@
     const pls = playlists();
     const pl = selPl();
     $('pl-detail-name').textContent = pl.name;
+    setIfNotFocused($('pl-desc'), pl.description || '');
     $('pl-root-badge').classList.toggle('hidden', pl.id !== pls.rootId);
     $('pl-setroot').disabled = pl.id === pls.rootId;
 
@@ -289,6 +294,11 @@
     meta.textContent = `${seq.length} Inhalte · ${fmtClock(total)}`;
     head.append(title, meta);
     card.appendChild(head);
+    if (pl.description) {
+      const desc = document.createElement('div');
+      desc.className = 'pl-card-desc'; desc.textContent = pl.description;
+      card.appendChild(desc);
+    }
 
     card.appendChild(buildStoryboard(seq));
 

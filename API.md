@@ -66,9 +66,12 @@ ermittle die **`videoId`** (der Teil nach `v=` in `youtube.com/watch?v=…`) und
 ```
 
 ### Playlists auflisten
-`GET /api/playlists` → `{ rootId, playlists: [ { id, name, active, itemCount, totalSec,
-after, nextId, overlays:[{overlayId,name,windows:[{start,end,enabled}]}] } ] }`
+`GET /api/playlists` → `{ rootId, playlists: [ { id, name, description, active, itemCount,
+totalSec, after, nextId, overlays:[{overlayId,name,windows:[{start,end,enabled}]}] } ] }`
 `GET /api/playlists/:id` → wie oben + ausgeflachte `items` (mit `itemId,type,name,start,dur`).
+**Playlist zur Nutzeranfrage finden:** gegen `name` **und** `description` matchen (z. B.
+„die mit PV-Anlagen" → Playlist, deren name/description Photovoltaik nennt). Reicht das nicht,
+`GET /api/playlists/:id` aufrufen und die Item-Namen prüfen. `description` ist freier Kontext.
 
 ### Playlist sofort abspielen (Übertragung starten)
 `POST /api/play`
@@ -241,9 +244,9 @@ für OpenAI `input_schema` → `parameters` umbenennen und in `{ "type":"functio
   },
   {
     "name": "create_playlist",
-    "description": "Playlist anlegen und optional mit Inhalten befüllen. POST /api/playlists. items[] sind content-Objekte (type: color|image|video|youtube|webpage).",
+    "description": "Playlist anlegen und optional mit Inhalten befüllen. POST /api/playlists. description = Kontext für spätere LLM-Auswahl. items[] sind content-Objekte (type: color|image|video|youtube|webpage).",
     "input_schema": { "type": "object", "properties": {
-      "name": { "type": "string" },
+      "name": { "type": "string" }, "description": { "type": "string" },
       "items": { "type": "array", "items": { "type": "object",
         "properties": {
           "type": { "type": "string", "enum": ["color","image","video","youtube","webpage"] },
@@ -326,6 +329,11 @@ für OpenAI `input_schema` → `parameters` umbenennen und in `{ "type":"functio
     "input_schema": { "type": "object", "properties": { "name": { "type": "string" } } }
   },
   {
+    "name": "set_playlist_meta",
+    "description": "Name und/oder Beschreibung (Kontext für LLM-Auswahl) einer Playlist setzen. POST /api/playlist/{playlistId}/rename.",
+    "input_schema": { "type": "object", "properties": { "playlistId": { "type": "string" }, "name": { "type": "string" }, "description": { "type": "string" } }, "required": ["playlistId"] }
+  },
+  {
     "name": "flash",
     "description": "Inhalt SOFORT für N Sekunden zentriert einblenden, entfernt sich selbst (kein go_live). Genau eins von qr/text/image angeben. POST /api/flash. Für 'zeig … jetzt für X Sekunden'.",
     "input_schema": { "type": "object", "properties": {
@@ -360,4 +368,5 @@ Mapping Tool → HTTP (Pfadparameter aus den Argumenten, Rest als JSON-Body):
 `update_element`→`PATCH /api/overlay/{overlayId}/element/{eid}` (Body `{element}`) ·
 `delete_element`→`DELETE /api/overlay/{overlayId}/element/{eid}` ·
 `remove_overlay_window`→`DELETE /api/playlist/{playlistId}/overlay-clips/{clipId}` ·
-`flash`→`POST /api/flash` · `flash_clear`→`POST /api/flash/clear`.
+`flash`→`POST /api/flash` · `flash_clear`→`POST /api/flash/clear` ·
+`set_playlist_meta`→`POST /api/playlist/{playlistId}/rename`.

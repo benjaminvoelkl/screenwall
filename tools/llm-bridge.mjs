@@ -22,7 +22,8 @@ const tools = [
   { name: 'list_playlists', description: 'Alle Playlists mit Namen, Gesamtdauer, Aktiv-Flag und Overlay-Fenstern auflisten.', input_schema: { type: 'object', properties: {} } },
   { name: 'get_playlist', description: 'Eine Playlist inkl. ausgeflachter Inhalte holen.', input_schema: { type: 'object', properties: { playlistId: { type: 'string' } }, required: ['playlistId'] } },
   { name: 'play', description: 'Eine Playlist sofort übertragen, optional ab Sekunde (time) ODER Prozent (percent, 0-100, hat Vorrang).', input_schema: { type: 'object', properties: { playlistId: { type: 'string' }, time: { type: 'number' }, percent: { type: 'number' } }, required: ['playlistId'] } },
-  { name: 'create_playlist', description: 'Playlist anlegen und optional mit Inhalten befüllen. items[] = content-Objekte (type: color|image|video|youtube|webpage).', input_schema: { type: 'object', properties: { name: { type: 'string' }, items: { type: 'array', items: { type: 'object' } } }, required: ['name'] } },
+  { name: 'create_playlist', description: 'Playlist anlegen und optional mit Inhalten befüllen. description = Kontext für spätere Auswahl. items[] = content-Objekte (type: color|image|video|youtube|webpage).', input_schema: { type: 'object', properties: { name: { type: 'string' }, description: { type: 'string' }, items: { type: 'array', items: { type: 'object' } } }, required: ['name'] } },
+  { name: 'set_playlist_meta', description: 'Name und/oder Beschreibung (Kontext für Auswahl) einer Playlist setzen.', input_schema: { type: 'object', properties: { playlistId: { type: 'string' }, name: { type: 'string' }, description: { type: 'string' } }, required: ['playlistId'] } },
   { name: 'set_element', description: 'Inhalt eines Overlay-Elements live setzen. eid via list_overlays. value passt sich dem Typ an (text/url/data).', input_schema: { type: 'object', properties: { eid: { type: 'string' }, value: { type: 'string' }, text: { type: 'string' }, url: { type: 'string' }, data: { type: 'string' }, fill: { type: 'string' } }, required: ['eid'] } },
   { name: 'list_overlays', description: 'Overlays mit Element-IDs auflisten (für set_element).', input_schema: { type: 'object', properties: {} } },
   { name: 'add_overlay_window', description: 'Ein Overlay in einer Playlist als Zeitfenster einblenden. duration weglassen = bis Programmende.', input_schema: { type: 'object', properties: { playlistId: { type: 'string' }, overlayId: { type: 'string' }, start: { type: 'number' }, duration: { type: 'number' } }, required: ['playlistId', 'overlayId'] } },
@@ -45,7 +46,8 @@ const ROUTES = {
   list_playlists: () => ['GET', '/api/playlists'],
   get_playlist: (i) => ['GET', `/api/playlists/${enc(i.playlistId)}`],
   play: (i) => ['POST', '/api/play', pick(i, ['playlistId', 'time', 'percent'])],
-  create_playlist: (i) => ['POST', '/api/playlists', pick(i, ['name', 'items'])],
+  create_playlist: (i) => ['POST', '/api/playlists', pick(i, ['name', 'description', 'items'])],
+  set_playlist_meta: (i) => ['POST', `/api/playlist/${enc(i.playlistId)}/rename`, pick(i, ['name', 'description'])],
   set_element: (i) => ['POST', `/api/element/${enc(i.eid)}`, pick(i, ['value', 'text', 'url', 'data', 'fill'])],
   list_overlays: () => ['GET', '/api/overlays'],
   add_overlay_window: (i) => ['POST', `/api/playlist/${enc(i.playlistId)}/overlay-clips`, pick(i, ['overlayId', 'start', 'duration'])],
@@ -87,6 +89,10 @@ immer go_live aufrufen.
 Videos kommen von YouTube: Es gibt keinen Such-Endpunkt. Wenn der Nutzer etwas „schauen" will
 (Fußball, Musik, Show …), wähle selbst ein passendes YouTube-Video/-Stream, nimm dessen videoId
 und benutze { "type":"youtube", "videoId":"…", "videoMode":"end", "muted":false }.
+
+Playlist finden: Playlists haben name UND description (freier Kontext). Matche die
+Nutzeranfrage (z. B. "die mit PV-Anlagen") gegen beide; reicht das nicht, hole get_playlist
+und prüfe die Item-Namen. Nie raten/IDs erfinden.
 
 Element-Positionen sind Bruchteile 0..1 (x,y,w,h). Sende bei play nicht time und percent
 gleichzeitig. Antworte knapp auf Deutsch und bestätige, was du getan hast (oder was schiefging).`;

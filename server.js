@@ -147,6 +147,7 @@ function normalizePlaylists(p) {
     byId[id] = {
       id,
       name: typeof pl.name === 'string' ? pl.name : 'Playlist',
+      description: typeof pl.description === 'string' ? pl.description : '', // Kontext für Menschen/LLMs
       after: ['next', 'loop', 'stop'].includes(pl.after) ? pl.after : 'loop',
       nextId: typeof pl.nextId === 'string' ? pl.nextId : null,
       items,
@@ -784,7 +785,7 @@ app.get('/api/playlists', (req, res) => {
   const pls = state.playlists;
   const list = Object.values(pls.byId).map((pl) => {
     const { total } = programEntries(pl.id);
-    return { id: pl.id, name: pl.name, active: pl.id === pls.rootId, itemCount: pl.items.length, totalSec: Math.round(total), after: pl.after, nextId: pl.nextId, overlays: overlaysOfPlaylist(pl) };
+    return { id: pl.id, name: pl.name, description: pl.description || '', active: pl.id === pls.rootId, itemCount: pl.items.length, totalSec: Math.round(total), after: pl.after, nextId: pl.nextId, overlays: overlaysOfPlaylist(pl) };
   });
   res.json({ rootId: pls.rootId, playlists: list });
 });
@@ -795,7 +796,7 @@ app.get('/api/playlists/:id', (req, res) => {
   if (!pl) return res.status(404).json({ error: 'Playlist nicht gefunden' });
   const { entries, total } = programEntries(pl.id);
   res.json({
-    id: pl.id, name: pl.name, active: pl.id === state.playlists.rootId, after: pl.after, nextId: pl.nextId, totalSec: Math.round(total),
+    id: pl.id, name: pl.name, description: pl.description || '', active: pl.id === state.playlists.rootId, after: pl.after, nextId: pl.nextId, totalSec: Math.round(total),
     items: entries.map((e) => ({ itemId: e.itemId, type: e.content.type, name: e.content.name || e.content.videoId || e.content.url || e.content.type, start: Math.round(e.start), dur: Math.round(e.dur) })),
     overlays: overlaysOfPlaylist(pl)
   });
@@ -807,7 +808,7 @@ app.post('/api/playlists', async (req, res) => {
   const b = req.body || {};
   const count = Object.keys(state.playlists.byId).length + 1;
   const name = (typeof b.name === 'string' && b.name.trim()) ? b.name.trim() : `Playlist ${count}`;
-  const pl = { id: newId(), name, after: 'loop', nextId: null, items: [] };
+  const pl = { id: newId(), name, description: typeof b.description === 'string' ? b.description : '', after: 'loop', nextId: null, items: [] };
   for (const raw of (Array.isArray(b.items) ? b.items : [])) {
     const content = normalizeContent(raw);
     if ((content.type === 'youtube' || content.type === 'video') && content.videoMode !== 'duration' && !(content.videoDuration > 0)) {
@@ -961,19 +962,20 @@ app.post('/api/playlist/:id/clone', (req, res) => {
     ? { id: newId(), kind: 'playlist', refId: it.refId }
     : { id: newId(), kind: 'content', content: normalizeContent(structuredClone(it.content)) });
   const overlayClips = (pl.overlayClips || []).map((c) => normalizeOverlayClip({ ...c, id: newId() }));
-  const copy = { id: newId(), name: `${pl.name} (Kopie)`, after: pl.after, nextId: pl.nextId, items, overlayClips };
+  const copy = { id: newId(), name: `${pl.name} (Kopie)`, description: pl.description || '', after: pl.after, nextId: pl.nextId, items, overlayClips };
   state.playlists.byId[copy.id] = copy;
   saveState();
   broadcast();
   res.json(copy);
 });
 
-// Playlist umbenennen.
+// Playlist umbenennen / Beschreibung (Kontext für LLMs) setzen. Body: { name?, description? }.
 app.post('/api/playlist/:id/rename', (req, res) => {
   const pl = getPlaylist(req.params.id);
   if (!pl) return res.status(404).json({ error: 'Playlist nicht gefunden' });
   const name = (req.body?.name || '').trim();
   if (name) pl.name = name;
+  if (typeof req.body?.description === 'string') pl.description = req.body.description;
   saveState();
   broadcast();
   res.json(pl);
