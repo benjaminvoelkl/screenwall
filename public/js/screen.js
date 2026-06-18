@@ -54,6 +54,7 @@
         else if (msg.type === 'cmd' && msg.cmd === 'pause') previewPause();
         else if (msg.type === 'cmd' && msg.cmd === 'play') previewPlay();
         else if (msg.type === 'cmd' && msg.cmd === 'nowplaying') { if (viewer === 'monitor') applyNowPlaying(msg); }
+        else if (msg.type === 'cmd' && msg.cmd === 'element') applyElementPatch(msg.eid, msg.patch);
         else if (msg.type === 'cmd' && msg.cmd === 'sync-request') { if (viewer === 'wall') sendNowPlaying(); }
       } catch (_) { /* ignorieren */ }
     });
@@ -97,11 +98,19 @@
   // passend zur Programmzeit (start/duration) ein/aus.
   let overlayLayers = [];      // [{ overlay, layerEl }]
   let dynTimers = [];          // Intervalle dynamischer (url-gebundener) Elemente
+  let elById = {};             // Element-ID -> [Applier], für Live-Pushes (POST /api/element/:id)
+  const regEl = (id, fn) => { (elById[id] = elById[id] || []).push(fn); };
+  function applyElementPatch(eid, patch) {
+    const fns = elById[eid];
+    if (!fns || !patch) return;
+    for (const fn of fns) { try { fn(patch); } catch (_) {} }
+  }
 
   function renderOverlays(list) {
     dynTimers.forEach(clearInterval); dynTimers = [];
     els.overlays.innerHTML = '';
     overlayLayers = [];
+    elById = {};
     for (const o of list) {
       const layer = document.createElement('div');
       layer.className = 'ov-layer hidden';
@@ -156,6 +165,7 @@
   function buildElement(e) {
     const box = document.createElement('div');
     box.className = `ov-el ov-${e.type}`;
+    box.dataset.eid = e.id;
     box.style.left = pct(e.x); box.style.top = pct(e.y);
     box.style.width = pct(e.w); box.style.height = pct(e.h);
     if (e.type === 'text') {
@@ -171,9 +181,11 @@
       tx.textContent = e.text || '';
       box.appendChild(tx);
       bindDynamic(e, (val) => { tx.textContent = val; });
+      regEl(e.id, (p) => { if (p.text != null) tx.textContent = p.text; if (p.color) tx.style.color = p.color; });
     } else if (e.type === 'shape') {
       const s = surfaceEl(e, e.fill);
       if (s) box.appendChild(s);
+      regEl(e.id, (p) => { if (p.fill && s) s.style.background = withAlpha(p.fill, e.fillOpacity); });
     } else if (e.type === 'image') {
       const img = document.createElement('img');
       img.className = `ov-img ${e.fit || 'contain'}`;
@@ -181,6 +193,7 @@
       img.src = e.filename ? `/uploads/${e.filename}` : (e.url || '');
       box.appendChild(img);
       bindDynamic(e, (val) => { if (val) img.src = val; });
+      regEl(e.id, (p) => { if (p.filename) img.src = `/uploads/${p.filename}`; else if (p.url != null) img.src = p.url; });
     } else if (e.type === 'qr') {
       const img = document.createElement('img');
       img.className = 'ov-qr'; img.alt = '';
@@ -188,6 +201,7 @@
       set(e.data);
       box.appendChild(img);
       bindDynamic(e, (val) => set(val));
+      regEl(e.id, (p) => { if (p.data != null) set(p.data); });
     }
     return box;
   }

@@ -589,6 +589,49 @@ function cleanupContentFile(content) {
   if (content && (content.type === 'image' || content.type === 'video') && content.filename) cleanupFile(content.filename);
 }
 
+// ---- Programm-Helfer (serverseitig; Spiegel der Client-Logik) --------------
+const NOMINAL_END = 30; // angenommene Dauer für "bis Ende"-Videos ohne bekannte Länge
+
+// Playlist rekursiv ausflachen (verschachtelte Playlists inline; Zyklen via visited).
+function flattenPlaylist(plId, byId, visited = new Set()) {
+  const pl = byId[plId];
+  if (!pl || visited.has(plId)) return [];
+  const v = new Set(visited); v.add(plId);
+  const out = [];
+  for (const it of pl.items) {
+    if (it.kind === 'content') out.push({ itemId: it.id, content: it.content });
+    else if (it.kind === 'playlist') out.push(...flattenPlaylist(it.refId, byId, v));
+  }
+  return out;
+}
+function itemDur(c) {
+  if ((c.type === 'video' || c.type === 'youtube') && c.videoMode !== 'duration') return c.videoDuration || NOMINAL_END;
+  return Math.max(1, c.durationSec || 6);
+}
+// Block-Layout mit Startzeiten + Gesamtdauer für eine Playlist.
+function programEntries(plId, byId = state.playlists.byId) {
+  const flat = flattenPlaylist(plId, byId);
+  let acc = 0;
+  const entries = flat.map((e) => { const dur = itemDur(e.content); const o = { itemId: e.itemId, content: e.content, start: acc, dur }; acc += dur; return o; });
+  return { entries, total: acc };
+}
+// Programmzeit t -> { itemId, offset, progTime } (letzter Block, falls über das Ende hinaus).
+function entryAtProgTime(entries, t) {
+  t = Math.max(0, t || 0);
+  if (!entries.length) return null;
+  for (const b of entries) if (t >= b.start && t < b.start + b.dur) return { itemId: b.itemId, offset: t - b.start, progTime: t };
+  const last = entries[entries.length - 1];
+  return { itemId: last.itemId, offset: Math.max(0, t - last.start), progTime: t };
+}
+// Element über alle Overlays eines States finden.
+function findElement(eid, root = state) {
+  for (const o of (root.overlays || [])) {
+    const el = (o.elements || []).find((e) => e.id === eid);
+    if (el) return { overlay: o, element: el };
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // HTTP / Express
 // ---------------------------------------------------------------------------
@@ -643,6 +686,136 @@ app.post('/api/golive', (req, res) => {
     liveNowPlaying = { cmd: 'nowplaying', contentId: g.itemId, time: g.time || 0, progTime: g.progTime || 0 };
   }
   res.json({ ok: true });
+});
+
+// ---------------------------------------------------------------------------
+// Control-API (externe Steuerung: Playlists / Play / Status / Elemente)
+// ---------------------------------------------------------------------------
+
+// Alle Playlists als JSON-Übersicht (mit Gesamtdauer + Aktiv-Flag).
+app.get('/api/playlists', (req, res) => {
+  const pls = state.playlists;
+  const list = Object.values(pls.byId).map((pl) => {
+    const { total } = programEntries(pl.id);
+    return { id: pl.id, name: pl.name, active: pl.id === pls.rootId, itemCount: pl.items.length, totalSec: Math.round(total), after: pl.after, nextId: pl.nextId };
+  });
+  res.json({ rootId: pls.rootId, playlists: list });
+});
+
+// Eine Playlist inkl. ausgeflachter Inhalte (mit Start/Dauer je Block).
+app.get('/api/playlists/:id', (req, res) => {
+  const pl = getPlaylist(req.params.id);
+  if (!pl) return res.status(404).json({ error: 'Playlist nicht gefunden' });
+  const { entries, total } = programEntries(pl.id);
+  res.json({
+    id: pl.id, name: pl.name, active: pl.id === state.playlists.rootId, after: pl.after, nextId: pl.nextId, totalSec: Math.round(total),
+    items: entries.map((e) => ({ itemId: e.itemId, type: e.content.type, name: e.content.name || e.content.videoId || e.content.url || e.content.type, start: Math.round(e.start), dur: Math.round(e.dur) }))
+  });
+});
+
+// Playlist anlegen und optional gleich mit Inhalten befüllen.
+// Body: { name?, items?: [ <content> ] } – content wie von normalizeContent erwartet.
+app.post('/api/playlists', async (req, res) => {
+  const b = req.body || {};
+  const count = Object.keys(state.playlists.byId).length + 1;
+  const name = (typeof b.name === 'string' && b.name.trim()) ? b.name.trim() : `Playlist ${count}`;
+  const pl = { id: newId(), name, after: 'loop', nextId: null, items: [] };
+  for (const raw of (Array.isArray(b.items) ? b.items : [])) {
+    const content = normalizeContent(raw);
+    if ((content.type === 'youtube' || content.type === 'video') && content.videoMode !== 'duration' && !(content.videoDuration > 0)) {
+      try { const d = await contentDuration(content); if (d > 0) content.videoDuration = d; } catch (_) {}
+    }
+    pl.items.push({ id: newId(), kind: 'content', content });
+  }
+  state.playlists.byId[pl.id] = pl;
+  saveState();
+  broadcast();
+  res.json(pl);
+});
+
+// Eine Playlist sofort übertragen – optional ab Sekunde (time) oder Prozent (percent).
+app.post('/api/play', (req, res) => {
+  const b = req.body || {};
+  const pl = getPlaylist(b.playlistId);
+  if (!pl) return res.status(404).json({ error: 'Playlist nicht gefunden' });
+  const { entries, total } = programEntries(pl.id);
+  let t = 0;
+  if (typeof b.percent === 'number') t = Math.max(0, Math.min(100, b.percent)) / 100 * total;
+  else if (typeof b.time === 'number') t = Math.max(0, b.time);
+  const e = entryAtProgTime(entries, t);
+  // Programm auf diese Playlist stellen und sofort veröffentlichen (Live-Preview folgt).
+  state.playlists.rootId = pl.id;
+  live = structuredClone(state);
+  offAir = false;
+  saveState(); saveLive();
+  broadcast();
+  if (e) {
+    sendToWall({ type: 'cmd', cmd: 'goto', itemId: e.itemId, time: e.offset, progTime: e.progTime });
+    liveNowPlaying = { cmd: 'nowplaying', contentId: e.itemId, time: e.offset, progTime: e.progTime };
+  }
+  res.json({ ok: true, playlistId: pl.id, progTime: Math.round(t), totalSec: Math.round(total), itemId: e ? e.itemId : null, offset: e ? Math.round(e.offset) : 0 });
+});
+
+// Status: was läuft gerade, wie lange noch, welche Overlays aktiv.
+app.get('/api/status', (req, res) => {
+  const pls = live.playlists;
+  const root = pls.byId[pls.rootId];
+  const { entries, total } = programEntries(pls.rootId, pls.byId);
+  const np = liveNowPlaying || {};
+  const progTime = typeof np.progTime === 'number' ? np.progTime : 0;
+  const cur = entries.find((x) => x.itemId === np.contentId) || null;
+  const itemDuration = np.duration || (cur ? cur.dur : 0);
+  const itemElapsed = np.time || 0;
+  const name = cur ? (cur.content.name || cur.content.videoId || cur.content.url || cur.content.type) : null;
+  const overlaysActive = (live.overlays || [])
+    .filter((o) => o.enabled !== false && progTime >= (o.start || 0) && (o.duration == null || progTime < (o.start || 0) + o.duration))
+    .map((o) => ({ overlayId: o.id, name: o.name }));
+  res.json({
+    offair: offAir,
+    playlist: root ? { id: root.id, name: root.name } : null,
+    now: np.contentId ? {
+      contentId: np.contentId, type: np.ctype || (cur && cur.content.type) || null, name, videoId: np.videoId || null,
+      itemDuration: Math.round(itemDuration), itemElapsed: Math.round(itemElapsed), itemRemaining: Math.max(0, Math.round(itemDuration - itemElapsed))
+    } : null,
+    program: { time: Math.round(progTime), totalSec: Math.round(total), remainingSec: Math.max(0, Math.round(total - progTime)), percent: total > 0 ? Math.round(progTime / total * 100) : 0 },
+    overlaysActive
+  });
+});
+
+// Overlays als JSON (inkl. Element-IDs für die Live-Befüllung via POST /api/element/:eid).
+app.get('/api/overlays', (req, res) => {
+  res.json({
+    overlays: (state.overlays || []).map((o) => ({
+      id: o.id, name: o.name, enabled: o.enabled, start: o.start, duration: o.duration,
+      elements: (o.elements || []).map((e) => ({ id: e.id, type: e.type, text: e.text, url: e.url, filename: e.filename, data: e.data }))
+    }))
+  });
+});
+
+// Element live mit Inhalt befüllen (dynamische Inhalte). Persistiert in Entwurf+Live und
+// pusht leichtgewichtig an Wand/Monitore (nur dieses Element, kein voller Rebuild/Flackern).
+app.post('/api/element/:eid', (req, res) => {
+  const eid = req.params.eid;
+  const found = findElement(eid, state);
+  if (!found) return res.status(404).json({ error: 'Element nicht gefunden' });
+  const el = found.element, b = req.body || {};
+  const patch = {};
+  if (typeof b.value === 'string') {
+    if (el.type === 'text') patch.text = b.value;
+    else if (el.type === 'image') patch.url = b.value;
+    else if (el.type === 'qr') patch.data = b.value;
+  }
+  for (const k of ['text', 'url', 'filename', 'data', 'fill', 'color']) if (typeof b[k] === 'string') patch[k] = b[k];
+  if (!Object.keys(patch).length) return res.status(400).json({ error: 'Kein Inhalt im Body (text/url/filename/data/fill/value)' });
+  const apply = (e2) => {
+    Object.assign(e2, patch);
+    if (e2.type === 'image') { if ('url' in patch) e2.filename = null; if ('filename' in patch) e2.url = ''; }
+  };
+  apply(el);
+  const lf = findElement(eid, live); if (lf) apply(lf.element);
+  saveState(); saveLive();
+  sendToScreens({ type: 'cmd', cmd: 'element', eid, patch });
+  res.json({ ok: true, element: el });
 });
 
 // ---------------------------------------------------------------------------
@@ -1219,6 +1392,13 @@ function sendToWall(msg) {
   const s = JSON.stringify(msg);
   for (const client of wss.clients) {
     if (client.isWall && client.role !== 'monitor' && client.readyState === client.OPEN) client.send(s);
+  }
+}
+// An alle anzeigenden Clients (echte Wand UND Live-Monitore) – für Live-Element-Pushes.
+function sendToScreens(msg) {
+  const s = JSON.stringify(msg);
+  for (const client of wss.clients) {
+    if (client.isWall && client.readyState === client.OPEN) client.send(s);
   }
 }
 
