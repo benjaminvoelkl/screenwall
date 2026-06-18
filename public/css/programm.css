@@ -51,7 +51,8 @@
   display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
   margin-bottom: 12px; color: var(--muted); font-size: 14px;
 }
-.tl-toolbar .tl-title { color: var(--text); font-weight: 700; letter-spacing: 0.02em; }
+.tl-toolbar .tl-title { color: var(--text); font-weight: 700; letter-spacing: 0.02em; text-decoration: none; cursor: pointer; }
+a.tl-title:hover { text-decoration: underline; color: var(--accent); }
 .tl-transport { display: flex; gap: 6px; margin-right: 4px; }
 .tl-tbtn {
   background: var(--panel-2); border: 1px solid var(--border); color: var(--text);

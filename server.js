@@ -659,6 +659,21 @@ app.post('/api/playlist', (req, res) => {
   res.json(pl);
 });
 
+// Playlist klonen: tiefe Kopie mit neuen Item-IDs. Eingebettete Sub-Playlists
+// werden geteilt (refId bleibt), hochgeladene Dateien werden referenziert (geteilt).
+app.post('/api/playlist/:id/clone', (req, res) => {
+  const pl = getPlaylist(req.params.id);
+  if (!pl) return res.status(404).json({ error: 'Playlist nicht gefunden' });
+  const items = pl.items.map((it) => it.kind === 'playlist'
+    ? { id: newId(), kind: 'playlist', refId: it.refId }
+    : { id: newId(), kind: 'content', content: normalizeContent(structuredClone(it.content)) });
+  const copy = { id: newId(), name: `${pl.name} (Kopie)`, after: pl.after, nextId: pl.nextId, items };
+  state.playlists.byId[copy.id] = copy;
+  saveState();
+  broadcast();
+  res.json(copy);
+});
+
 // Playlist umbenennen.
 app.post('/api/playlist/:id/rename', (req, res) => {
   const pl = getPlaylist(req.params.id);

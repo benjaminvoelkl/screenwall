@@ -7,7 +7,10 @@
   const $ = (id) => document.getElementById(id);
 
   let state = null;
-  let selectedId = null;        // aktuell bearbeitete Playlist (nur UI-Auswahl)
+  // Modus aus der URL: ?edit=<id> = Detail/Bearbeiten einer Playlist, sonst Übersicht.
+  const editId = new URLSearchParams(location.search).get('edit');
+  const detailMode = !!editId;
+  let selectedId = editId;      // im Detail-Modus die bearbeitete Playlist
   let liveNowPlaying = null;    // Was läuft gerade live auf der Wand?
 
   // ---- API-Helfer ---------------------------------------------------------
@@ -53,18 +56,20 @@
   }
   connect();
   fetch('/api/state').then((r) => r.json()).then((s) => { state = s; render(); });
+  // Echte Video-/YouTube-Längen nachtragen, damit die Storyboard-Breiten stimmen.
+  fetch('/api/probe-durations', { method: 'POST' }).catch(() => {});
 
   // ===== Playlist-Verwaltung ==============================================
-  $('pl-select').addEventListener('change', (e) => { selectedId = e.target.value; render(); });
-
+  // Neue Playlist anlegen -> direkt in die Detailansicht.
   $('pl-new').addEventListener('click', async () => {
     const n = Object.keys(playlists().byId).length + 1;
     const name = prompt('Name der neuen Playlist:', `Playlist ${n}`);
     if (name === null) return;
     const pl = await api('POST', '/api/playlist', { name });
-    if (pl && pl.id) selectedId = pl.id;
+    if (pl && pl.id) location.href = '/playlists?edit=' + pl.id;
   });
 
+  // Detail-Kopf-Aktionen (Buttons liegen in #pl-detail, im Übersichtsmodus ausgeblendet).
   $('pl-rename').addEventListener('click', async () => {
     const pl = selPl();
     if (!pl) return;
@@ -72,16 +77,20 @@
     if (name === null) return;
     await api('POST', `/api/playlist/${pl.id}/rename`, { name });
   });
-
+  $('pl-clone').addEventListener('click', async () => {
+    const pl = selPl();
+    if (!pl) return;
+    const copy = await api('POST', `/api/playlist/${pl.id}/clone`);
+    if (copy && copy.id) location.href = '/playlists?edit=' + copy.id;
+  });
   $('pl-delete').addEventListener('click', async () => {
     const pl = selPl();
     if (!pl) return;
     if (Object.keys(playlists().byId).length <= 1) { alert('Mindestens eine Playlist muss bestehen bleiben.'); return; }
     if (!confirm(`Playlist „${pl.name}" mit allen Inhalten löschen?`)) return;
     await api('DELETE', `/api/playlist/${pl.id}`);
-    selectedId = null;
+    location.href = '/playlists';
   });
-
   $('pl-setroot').addEventListener('click', async () => {
     const pl = selPl();
     if (pl) await api('POST', '/api/playlist/root', { id: pl.id });
@@ -211,23 +220,19 @@
   function render() {
     if (!state) return;
     const pls = playlists();
-    if (!selectedId || !pls.byId[selectedId]) selectedId = pls.rootId;
+    if (detailMode && pls.byId[editId]) { selectedId = editId; renderDetail(); }
+    else renderOverview();
+  }
+  function showMode(detail) { $('pl-overview').hidden = detail; $('pl-detail').hidden = !detail; }
 
-    // Playlist-Auswahl
-    const sel = $('pl-select');
-    if (document.activeElement !== sel) {
-      sel.innerHTML = '';
-      for (const pl of Object.values(pls.byId)) {
-        const opt = document.createElement('option');
-        opt.value = pl.id;
-        opt.textContent = `${pl.id === pls.rootId ? '★ ' : ''}${pl.name} (${pl.items.length})`;
-        sel.appendChild(opt);
-      }
-      sel.value = selectedId;
-    }
-    $('pl-root-badge').classList.toggle('hidden', selectedId !== pls.rootId);
-
+  // ----- Detail/Bearbeiten -------------------------------------------------
+  function renderDetail() {
+    showMode(true);
+    const pls = playlists();
     const pl = selPl();
+    $('pl-detail-name').textContent = pl.name;
+    $('pl-root-badge').classList.toggle('hidden', pl.id !== pls.rootId);
+    $('pl-setroot').disabled = pl.id === pls.rootId;
 
     // Nachfolge-Auswahl
     const next = $('pl-next');
@@ -257,6 +262,160 @@
     }
 
     renderItems(pl);
+  }
+
+  // ----- Übersicht: alle Playlists als Karten mit Storyboard ---------------
+  function renderOverview() {
+    showMode(false);
+    const pls = playlists();
+    const cards = $('pl-cards');
+    cards.innerHTML = '';
+    for (const pl of Object.values(pls.byId)) cards.appendChild(buildPlaylistCard(pl, pl.id === pls.rootId));
+  }
+
+  function buildPlaylistCard(pl, active) {
+    const card = document.createElement('div');
+    card.className = 'pl-card' + (active ? ' active' : '');
+
+    const head = document.createElement('div');
+    head.className = 'pl-card-head';
+    const title = document.createElement('div');
+    title.className = 'pl-card-title';
+    title.innerHTML = `<span class="pl-card-name">${escapeHtml(pl.name)}</span>` + (active ? ' <span class="pl-card-live">● Aktiv</span>' : '');
+    const seq = flatten(pl.id, playlists().byId, new Set());
+    const total = seq.reduce((a, e) => a + blockDur(e.itemId, e.content), 0);
+    const meta = document.createElement('div');
+    meta.className = 'pl-card-meta';
+    meta.textContent = `${seq.length} Inhalte · ${fmtClock(total)}`;
+    head.append(title, meta);
+    card.appendChild(head);
+
+    card.appendChild(buildStoryboard(seq));
+
+    const acts = document.createElement('div');
+    acts.className = 'pl-card-acts';
+    const view = document.createElement('button');
+    view.className = 'btn'; view.textContent = 'View more →';
+    view.addEventListener('click', () => { location.href = '/playlists?edit=' + pl.id; });
+    acts.appendChild(view);
+    if (!active) {
+      const setr = document.createElement('button');
+      setr.className = 'btn ghost'; setr.textContent = '★ Aktiv setzen';
+      setr.addEventListener('click', () => api('POST', '/api/playlist/root', { id: pl.id }));
+      acts.appendChild(setr);
+    }
+    const clone = document.createElement('button');
+    clone.className = 'btn ghost'; clone.textContent = 'Klonen';
+    clone.addEventListener('click', async () => { const c = await api('POST', `/api/playlist/${pl.id}/clone`); if (c && c.id) location.href = '/playlists?edit=' + c.id; });
+    acts.appendChild(clone);
+    const del = document.createElement('button');
+    del.className = 'btn ghost'; del.textContent = 'Löschen';
+    del.addEventListener('click', async () => {
+      if (Object.keys(playlists().byId).length <= 1) { alert('Mindestens eine Playlist muss bestehen bleiben.'); return; }
+      if (!confirm(`Playlist „${pl.name}" mit allen Inhalten löschen?`)) return;
+      await api('DELETE', `/api/playlist/${pl.id}`);
+    });
+    acts.appendChild(del);
+    card.appendChild(acts);
+    return card;
+  }
+
+  // ----- Storyboard (kompakte Mini-Timeline; Filmstreifen je Video) --------
+  const NOMINAL_END = 30, THUMB_PX = 90, MAXF = 24, SB_PPS = 1.2;
+  const TYPE_BADGE = { color: '🎨', image: '🖼', video: '🎬', youtube: '▶', webpage: '🌐', screenshare: '🖥' };
+  const measured = {}; // hier ungenutzt; Dauern kommen aus videoDuration (Server-Probe)
+
+  function flatten(plId, byId, visited) {
+    const pl = byId[plId];
+    if (!pl || visited.has(plId)) return [];
+    const v = new Set(visited); v.add(plId);
+    const out = [];
+    for (const it of pl.items) {
+      if (it.kind === 'content') out.push({ itemId: it.id, content: it.content });
+      else if (it.kind === 'playlist') out.push(...flatten(it.refId, byId, v));
+    }
+    return out;
+  }
+  function blockDur(itemId, c) {
+    if ((c.type === 'video' || c.type === 'youtube') && c.videoMode !== 'duration') return c.videoDuration || measured[itemId] || NOMINAL_END;
+    return Math.max(1, c.durationSec || 6);
+  }
+
+  function buildStoryboard(seq) {
+    const strip = document.createElement('div');
+    strip.className = 'pl-storyboard';
+    if (!seq.length) { strip.classList.add('empty'); strip.textContent = 'Noch keine Inhalte'; return strip; }
+    for (const e of seq) {
+      const c = e.content;
+      const dur = blockDur(e.itemId, c);
+      const w = Math.round(Math.max(64, Math.min(480, dur * SB_PPS)));
+      const pps = w / Math.max(0.5, dur);
+      const block = document.createElement('div');
+      block.className = 'pl-sb-block type-' + c.type;
+      block.style.width = w + 'px';
+      if (c.type === 'color') block.style.background = c.color || '#000';
+      else if (c.type === 'image') block.style.backgroundImage = `url('/uploads/${c.filename}')`;
+      else if (c.type === 'youtube') {
+        block.style.backgroundImage = `url('https://i.ytimg.com/vi/${c.videoId}/mqdefault.jpg')`;
+        const sb = ytStoryboard(c.videoId);
+        if (sb) block.appendChild(buildYtFilmstrip(sb, dur, pps));
+      } else if (c.type === 'video' && c.filename) block.appendChild(buildFilmstrip(c.filename, dur, pps));
+      const badge = document.createElement('span'); badge.className = 'pl-sb-badge'; badge.textContent = TYPE_BADGE[c.type] || '•';
+      block.appendChild(badge);
+      strip.appendChild(block);
+    }
+    return strip;
+  }
+
+  // Filmstreifen aus Video-Keyframes (Upload via /api/frame).
+  function buildFilmstrip(filename, dur, pps) {
+    dur = dur || 0;
+    const strip = document.createElement('div'); strip.className = 'pl-fs';
+    const nice = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800, 3600];
+    let G = nice.find((n) => n >= THUMB_PX / Math.max(0.0001, pps)) || 3600;
+    if (Math.ceil(dur / G) > MAXF) G = dur / MAXF;
+    for (let t = 0; t < dur - 0.01; t += G) {
+      const w = Math.min(G, dur - t);
+      const img = document.createElement('img'); img.className = 'pl-fr'; img.loading = 'lazy'; img.alt = '';
+      img.style.left = (t * pps) + 'px'; img.style.width = (w * pps) + 'px';
+      img.src = `/api/frame?file=${encodeURIComponent(filename)}&t=${Math.round(t + w / 2)}`;
+      strip.appendChild(img);
+    }
+    return strip;
+  }
+  // YouTube-Filmstreifen aus dem Storyboard (Sprite-Kacheln per CSS-Hintergrund).
+  const ytSb = {};
+  function ytStoryboard(videoId) {
+    if (!videoId) return null;
+    if (videoId in ytSb) return ytSb[videoId] === 'pending' ? null : ytSb[videoId];
+    ytSb[videoId] = 'pending';
+    fetch(`/api/yt-storyboard?id=${encodeURIComponent(videoId)}`)
+      .then((r) => r.json()).then((d) => { ytSb[videoId] = (d && d.ok) ? d : null; if (d && d.ok && !detailMode) renderOverview(); })
+      .catch(() => { ytSb[videoId] = null; });
+    return null;
+  }
+  function buildYtFilmstrip(sb, dur, pps) {
+    dur = Math.max(0, dur || sb.duration || 0);
+    const strip = document.createElement('div'); strip.className = 'pl-fs';
+    const effInt = sb.intervalMs > 0 ? sb.intervalMs / 1000 : (sb.duration / Math.max(1, sb.frames));
+    const nice = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800, 3600];
+    let G = nice.find((n) => n >= THUMB_PX / Math.max(0.0001, pps)) || 3600;
+    G = Math.max(G, effInt);
+    if (Math.ceil(dur / G) > MAXF) G = dur / MAXF;
+    for (let t = 0; t < dur - 0.01; t += G) {
+      const w = Math.min(G, dur - t);
+      const fi = Math.min(sb.frames - 1, Math.max(0, Math.floor((t + w / 2) / effInt)));
+      const sheet = Math.floor(fi / (sb.cols * sb.rows));
+      const pos = fi % (sb.cols * sb.rows);
+      const col = pos % sb.cols, row = Math.floor(pos / sb.cols);
+      const cell = document.createElement('div'); cell.className = 'pl-fr sb';
+      cell.style.left = (t * pps) + 'px'; cell.style.width = (w * pps) + 'px';
+      cell.style.backgroundImage = `url('${sb.sheets[sheet]}')`;
+      cell.style.backgroundSize = `${sb.cols * 100}% ${sb.rows * 100}%`;
+      cell.style.backgroundPosition = `${sb.cols > 1 ? (col / (sb.cols - 1)) * 100 : 0}% ${sb.rows > 1 ? (row / (sb.rows - 1)) * 100 : 0}%`;
+      strip.appendChild(cell);
+    }
+    return strip;
   }
 
   function renderItems(pl) {
