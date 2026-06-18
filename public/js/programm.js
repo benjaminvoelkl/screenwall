@@ -53,6 +53,10 @@
   }
   connect();
   fetch('/api/state').then((r) => r.json()).then((s) => { state = s; render(); });
+  // Echte Video-/YouTube-Längen serverseitig nachtragen, damit die Timeline korrekt
+  // layoutet (ohne sie laufen ~30 s Nominaldauer pro Block). Der folgende state-
+  // Broadcast rendert die Timeline mit den echten Dauern neu.
+  fetch('/api/probe-durations', { method: 'POST' }).catch(() => {});
 
   // ---- Vorschau-Modus: Live-Spiegel (Wand) <-> Entwurf-Vorschau -----------
   // Standard = Live-Spiegel (Sicht 'monitor', /screen?view=live): zeigt die echte
@@ -62,6 +66,7 @@
   // Im Entwurf-Modus meldet die Vorschau laufend ihre Position (itemId + Zeit) und
   // der Playhead folgt; im Live-Modus folgt der Playhead der Wand (nowplaying).
   let scrubbing = false;
+  let zooming = false;   // während Zoom selbst scrollen wir verankert
   window.addEventListener('message', (e) => {
     const d = e.data;
     if (!d || d.type !== 'screen-pos' || !d.itemId) return;
@@ -69,12 +74,15 @@
     const dur = d.pos ? d.pos.duration || 0 : 0;
     const b = blocks.find((x) => x.itemId === d.itemId);
     if (!b) return;
+    // Play/Pause-Zustand der Vorschau übernehmen, damit Button & Playhead stimmen.
+    if (mode === 'draft' && typeof d.paused === 'boolean') syncPlaying(!d.paused);
     const c = b.content;
     if (dur > 0 && (c.type === 'video' || c.type === 'youtube') && c.videoMode !== 'duration'
         && Math.abs((measured[d.itemId] || 0) - dur) > 0.5) {
       measured[d.itemId] = dur; render(); return;
     }
-    if (!scrubbing) { playheadT = Math.min(total, b.start + t); positionPlayhead(); }
+    // Bei Pause die rote Linie einfrieren (kein Fortschreiben aus pos.time).
+    if (!scrubbing && !d.paused) { playheadT = Math.min(total, b.start + t); positionPlayhead(); }
   });
 
   // ===== Ausflachen (Quelle: screen.js:flatten – bewusst gespiegelt) ========
@@ -111,7 +119,8 @@
     const v = Number($('tl-zoom').value);
     const fit = fitPxPerSec();
     const detail = Math.max(fit, MAX_DETAIL_PX);
-    return fit + (detail - fit) * (1 - v / 100);
+    // Geometrisch interpolieren: gleichmäßiges Zoomgefühl von Fit (v=100) bis Detail (v=0).
+    return fit * Math.pow(detail / fit, (100 - v) / 100);
   }
 
   function render() {
@@ -180,8 +189,12 @@
       el.style.width = b.w + 'px';
       if (c.type === 'color') el.style.background = c.color || '#000';
       else if (c.type === 'image') el.style.backgroundImage = `url('/uploads/${c.filename}')`;
-      else if (c.type === 'youtube') el.style.backgroundImage = `url('https://i.ytimg.com/vi/${c.videoId}/mqdefault.jpg')`;
-      else if (c.type === 'video' && c.filename) el.appendChild(buildFilmstrip(c.filename, b.dur));
+      else if (c.type === 'youtube') {
+        // Standbild als Fallback; sobald das Storyboard geladen ist, Filmstreifen drüber.
+        el.style.backgroundImage = `url('https://i.ytimg.com/vi/${c.videoId}/mqdefault.jpg')`;
+        const sb = ytStoryboard(c.videoId);
+        if (sb) el.appendChild(buildYtFilmstrip(sb, b.dur, pxPerSec));
+      } else if (c.type === 'video' && c.filename) el.appendChild(buildFilmstrip(c.filename, b.dur, pxPerSec));
       if ((c.type === 'video' || c.type === 'youtube') && c.videoMode !== 'duration') el.classList.add('end-video');
 
       const badge = document.createElement('span');
@@ -196,8 +209,9 @@
       const dur = document.createElement('div');
       dur.className = 'tl-b-dur';
       const isEnd = (c.type === 'video' || c.type === 'youtube') && c.videoMode !== 'duration';
+      const known = measured[b.itemId] || c.videoDuration;
       dur.textContent = isEnd
-        ? (measured[b.itemId] ? fmtClock(b.dur) : '≈ bis Ende')
+        ? (known ? fmtClock(b.dur) : '≈ bis Ende')
         : fmtClock(b.dur);
       el.appendChild(dur);
 
@@ -205,21 +219,70 @@
     }
   }
 
-  // Filmstreifen: bei (langen) Videos alle ~60s ein Keyframe als Vorschaubild.
-  function buildFilmstrip(filename, dur) {
-    const FRAME_INTERVAL = 60; // alle X Sekunden ein Keyframe
-    const MAXF = 40;
-    const count = Math.min(MAXF, Math.max(1, Math.round((dur || 0) / FRAME_INTERVAL)));
+  // Filmstreifen: Keyframe-Dichte folgt dem Zoom. Der Abstand wird als Zeit-Raster G
+  // (aus „schönen" Werten) gewählt, damit ~jeden THUMB_PX Pixel ein Bild erscheint –
+  // beim Reinzoomen mehr Szenen, beim Rauszoomen weniger. Da die Zeitstempel auf dem
+  // festen Raster liegen, werden die /api/frame-Thumbnails über Zoomstufen wiederverwendet.
+  const THUMB_PX = 110;   // Ziel-Abstand zwischen Keyframes
+  const MAXF = 60;        // Obergrenze pro Block
+  function buildFilmstrip(filename, dur, pps) {
+    dur = dur || 0;
     const strip = document.createElement('div');
     strip.className = 'tl-filmstrip';
-    const step = (dur || 0) / count;
-    for (let i = 0; i < count; i++) {
+    // Rasterabstand G aus netten Werten, Ziel ~THUMB_PX zwischen Bildern.
+    const target = THUMB_PX / Math.max(0.0001, pps); // Sekunden pro THUMB_PX
+    const nice = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800, 3600];
+    let G = nice.find((n) => n >= target) || 3600;
+    if (Math.ceil(dur / G) > MAXF) G = dur / MAXF; // Obergrenze einhalten
+    for (let t = 0; t < dur - 0.01; t += G) {
+      const w = Math.min(G, dur - t);
       const img = document.createElement('img');
       img.className = 'tl-frame'; img.loading = 'lazy'; img.alt = '';
-      img.style.left = (i / count * 100) + '%';
-      img.style.width = (100 / count) + '%';
-      img.src = `/api/frame?file=${encodeURIComponent(filename)}&t=${Math.round(i * step + step / 2)}`;
+      img.style.left = (t * pps) + 'px';
+      img.style.width = (w * pps) + 'px';
+      img.src = `/api/frame?file=${encodeURIComponent(filename)}&t=${Math.round(t + w / 2)}`;
       strip.appendChild(img);
+    }
+    return strip;
+  }
+
+  // YouTube-Filmstreifen aus dem Storyboard (Sprite-Sheets mit Vorschaubildern).
+  // Pro Zelle wird die passende Kachel per CSS-Hintergrund ausgeschnitten – keine
+  // Server-Bildverarbeitung nötig. Dichte folgt dem Zoom wie bei Upload-Videos.
+  const ytSb = {}; // videoId -> Storyboard-Daten | 'pending' | null
+  function ytStoryboard(videoId) {
+    if (!videoId) return null;
+    if (videoId in ytSb) return ytSb[videoId] === 'pending' ? null : ytSb[videoId];
+    ytSb[videoId] = 'pending';
+    fetch(`/api/yt-storyboard?id=${encodeURIComponent(videoId)}`)
+      .then((r) => r.json()).then((d) => { ytSb[videoId] = (d && d.ok) ? d : null; if (d && d.ok) render(); })
+      .catch(() => { ytSb[videoId] = null; });
+    return null;
+  }
+  function buildYtFilmstrip(sb, dur, pps) {
+    dur = Math.max(0, dur || sb.duration || 0);
+    const strip = document.createElement('div');
+    strip.className = 'tl-filmstrip';
+    const effInt = sb.intervalMs > 0 ? sb.intervalMs / 1000 : (sb.duration / Math.max(1, sb.frames));
+    const target = THUMB_PX / Math.max(0.0001, pps); // Sekunden pro THUMB_PX
+    const nice = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800, 3600];
+    let G = nice.find((n) => n >= target) || 3600;
+    G = Math.max(G, effInt);                          // nicht feiner als das Storyboard-Raster
+    if (Math.ceil(dur / G) > MAXF) G = dur / MAXF;    // Obergrenze
+    for (let t = 0; t < dur - 0.01; t += G) {
+      const w = Math.min(G, dur - t);
+      const fi = Math.min(sb.frames - 1, Math.max(0, Math.floor((t + w / 2) / effInt)));
+      const sheet = Math.floor(fi / (sb.cols * sb.rows));
+      const pos = fi % (sb.cols * sb.rows);
+      const col = pos % sb.cols, row = Math.floor(pos / sb.cols);
+      const cell = document.createElement('div');
+      cell.className = 'tl-frame tl-sb';
+      cell.style.left = (t * pps) + 'px';
+      cell.style.width = (w * pps) + 'px';
+      cell.style.backgroundImage = `url('${sb.sheets[sheet]}')`;
+      cell.style.backgroundSize = `${sb.cols * 100}% ${sb.rows * 100}%`;
+      cell.style.backgroundPosition = `${sb.cols > 1 ? (col / (sb.cols - 1)) * 100 : 0}% ${sb.rows > 1 ? (row / (sb.rows - 1)) * 100 : 0}%`;
+      strip.appendChild(cell);
     }
     return strip;
   }
@@ -330,8 +393,8 @@
     const px = playheadT * pxPerSec;
     $('tl-playhead').style.left = px + 'px';
     $('prog-clock').textContent = `${fmtClock(playheadT)} / ${fmtClock(total)}`;
-    // Playhead im Sichtbereich halten (außer der Nutzer zieht gerade selbst).
-    if (!scrubbing) {
+    // Playhead im Sichtbereich halten (außer beim Scrubben/Zoomen, die scrollen selbst).
+    if (!scrubbing && !zooming) {
       const sc = $('tl-scroll');
       if (px < sc.scrollLeft + 30 || px > sc.scrollLeft + sc.clientWidth - 30) {
         sc.scrollLeft = Math.max(0, px - sc.clientWidth / 2);
@@ -382,8 +445,17 @@
     tracks.addEventListener('pointercancel', end);
   })();
 
-  $('tl-zoom').addEventListener('input', render);
-  $('tl-fit').addEventListener('click', () => { $('tl-zoom').value = 100; render(); });
+  // Zoomen verankert: Zeit unter der Viewport-Mitte bleibt nach dem Render erhalten.
+  function applyZoom() {
+    const sc = $('tl-scroll');
+    const anchorT = pxPerSec > 0 ? (sc.scrollLeft + sc.clientWidth / 2) / pxPerSec : 0;
+    zooming = true;
+    render();
+    sc.scrollLeft = Math.max(0, anchorT * pxPerSec - sc.clientWidth / 2);
+    zooming = false;
+  }
+  $('tl-zoom').addEventListener('input', applyZoom);
+  $('tl-fit').addEventListener('click', () => { $('tl-zoom').value = 100; applyZoom(); });
   $('tl-add-overlay').addEventListener('click', async () => {
     const r = await fetch('/api/overlay', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
     const o = await r.json().catch(() => null);
@@ -419,6 +491,12 @@
     $('tl-transport').style.display = m === 'draft' ? '' : 'none';
     $('tl-live').classList.toggle('hidden', m === 'live');
     $('prog-mode').textContent = m === 'live' ? 'Live-Vorschau (Wand)' : 'Entwurf-Vorschau – am Zeitstrahl scrubben';
+    // Live-Hinweis: Badge + roter Rahmen, wenn die Vorschau die Wand spiegelt.
+    const live = m === 'live';
+    $('prev-stage').classList.toggle('live', live);
+    const badge = $('prog-live-badge');
+    badge.classList.toggle('is-live', live);
+    badge.textContent = live ? '● LIVE auf der Wand' : 'ENTWURF';
     if (m === 'draft' && changed) seedDraftToPlayhead();
   }
   // Nach Moduswechsel die (neu ladende) Entwurf-Vorschau auf den Playhead setzen.
@@ -438,24 +516,44 @@
     }
   }, 200);
 
-  // ===== Wiedergabe (Play/Pause – nur im Entwurf-Modus) ====================
+  // ===== Wiedergabe (Play/Pause – pausiert nur die Vorschau) ===============
   let playing = true;
-  function setPlaying(p) {
+  // Button-/Statusanzeige ohne Kommando (Spiegelung des echten Vorschau-Zustands).
+  function syncPlaying(p) {
+    if (playing === p) return;
     playing = p;
     $('tl-play').textContent = p ? '⏸' : '▶';
     $('tl-play').title = p ? 'Pause (Leertaste)' : 'Abspielen (Leertaste)';
+  }
+  function setPlaying(p) {
+    syncPlaying(p);
     wsSend({ type: 'cmd', cmd: p ? 'play' : 'pause' });
   }
-  function togglePlay() { if (mode === 'draft') setPlaying(!playing); }
+  // Space pausiert die Vorschau. Im Live-Spiegel zuerst in den Entwurf wechseln
+  // (Wand bleibt unangetastet) und die Pause robust an das ladende Iframe nachsenden.
+  function togglePlay() {
+    if (mode === 'live') {
+      setPreviewMode('draft');
+      playing = true; // frisch geladene Vorschau spielt
+      setPlaying(false);
+      [300, 900, 1600].forEach((d) => setTimeout(() => { if (mode === 'draft' && !playing) wsSend({ type: 'cmd', cmd: 'pause' }); }, d));
+      return;
+    }
+    setPlaying(!playing);
+  }
   $('tl-play').addEventListener('click', togglePlay);
   $('tl-to-start').addEventListener('click', () => scrubTo(0));
   document.addEventListener('keydown', (e) => {
-    if (e.code !== 'Space' || mode !== 'draft') return;
     const t = e.target;
     if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
     if (!$('golive-modal').classList.contains('hidden')) return;
-    e.preventDefault();
-    togglePlay();
+    if (e.code === 'Space') { e.preventDefault(); togglePlay(); return; }
+    // Zifferntasten 0–9 springen prozentual auf die Timeline (0=Start, 5=50%, 9=90%).
+    if (/^[0-9]$/.test(e.key)) {
+      e.preventDefault();
+      if (mode === 'live') setPreviewMode('draft');
+      scrubTo(total * Number(e.key) / 10);
+    }
   });
 
   // ===== Go Live ===========================================================

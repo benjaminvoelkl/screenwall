@@ -96,8 +96,10 @@ function normalizeContent(c) {
     out.videoMode = c.videoMode === 'duration' ? 'duration' : 'end';
     out.muted = c.muted !== false;
   }
-  // Gemessene Gesamtlänge (per ffprobe beim Upload) – für Timeline-Breite & Keyframes.
-  if (type === 'video' && typeof c.videoDuration === 'number' && c.videoDuration > 0) out.videoDuration = c.videoDuration;
+  // Gemessene Gesamtlänge (Upload: ffprobe, YouTube: Watch-Seite) – für Timeline-
+  // Breite/Layout & Keyframes. Auch für YouTube behalten, damit das Scrubboard die
+  // echte Länge kennt (sonst Fallback auf 30 s pro Block).
+  if ((type === 'video' || type === 'youtube') && typeof c.videoDuration === 'number' && c.videoDuration > 0) out.videoDuration = c.videoDuration;
   if (type === 'image' || type === 'video' || type === 'youtube') out.crop = !!c.crop;
   return out;
 }
@@ -397,6 +399,104 @@ function probeDuration(filename) {
   });
 }
 
+// YouTube-Metadaten ohne API-Key: Watch-Seite einmal laden und sowohl Länge
+// ("lengthSeconds") als auch das Storyboard (Scrubbing-Vorschaubilder) parsen.
+// Ergebnis { duration, storyboard } je videoId cachen (kleines Objekt, nicht das HTML).
+const ytMetaCache = new Map();
+const MAX_SB_SHEETS = 12; // Obergrenze Sprite-Sheets pro Video (Requests begrenzen)
+
+// Storyboard-Spec (storyboard3) parsen und das beste Level wählen.
+// Spec: baseUrl|lvl0|lvl1|… ; lvlN = w#h#frames#cols#rows#interval#name#sigh
+function parseStoryboard(spec, duration) {
+  const parts = spec.split('|');
+  const base = parts[0];
+  const levels = parts.slice(1).map((p, i) => {
+    const a = p.split('#');
+    const [w, h, frames, cols, rows, interval] = a.map(Number);
+    const name = a[6], sigh = a[7];
+    const tmpl = base.replace('$L', String(i)).replace('$N', name) + '&sigh=' + sigh;
+    const perSheet = cols * rows;
+    return { w, h, frames, cols, rows, interval, perSheet, sheets: Math.ceil(frames / perSheet), tmpl };
+  }).filter((l) => l.frames > 0 && l.cols > 0 && l.rows > 0);
+  if (!levels.length) return null;
+  // Bevorzugt feste Intervalle mit möglichst vielen Frames, aber begrenzter Sheet-Zahl;
+  // sonst das Übersichtslevel (interval 0 = 100 Frames gleichmäßig, 1 Sheet).
+  const fixed = levels.filter((l) => l.interval > 0 && l.sheets <= MAX_SB_SHEETS);
+  const best = fixed.sort((a, b) => (b.frames - a.frames) || (a.sheets - b.sheets))[0] || levels[0];
+  const sheets = [];
+  for (let s = 0; s < best.sheets; s++) sheets.push(best.tmpl.replace('$M', String(s)));
+  return {
+    w: best.w, h: best.h, cols: best.cols, rows: best.rows, frames: best.frames,
+    intervalMs: best.interval, duration, sheets
+  };
+}
+
+async function loadYtMeta(videoId) {
+  if (!videoId || !/^[\w-]{6,}$/.test(videoId)) return { duration: 0, storyboard: null };
+  if (ytMetaCache.has(videoId)) return ytMetaCache.get(videoId);
+  let duration = 0, storyboard = null;
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8000);
+    const r = await fetch(`https://www.youtube.com/watch?v=${videoId}&hl=en`, {
+      redirect: 'follow', signal: ctrl.signal,
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)', 'Accept-Language': 'en-US,en;q=0.9' }
+    });
+    clearTimeout(timer);
+    const html = await r.text();
+    let m = html.match(/"lengthSeconds":"(\d+)"/);
+    if (m) duration = parseInt(m[1], 10);
+    if (!duration) {
+      const m2 = html.match(/itemprop="duration"\s+content="PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?"/);
+      if (m2) duration = (parseInt(m2[1] || 0, 10) * 3600) + (parseInt(m2[2] || 0, 10) * 60) + parseInt(m2[3] || 0, 10);
+    }
+    duration = isFinite(duration) && duration > 0 ? duration : 0;
+    const sb = html.match(/"playerStoryboardSpecRenderer":\{"spec":"([^"]+)"/);
+    if (sb) { try { storyboard = parseStoryboard(sb[1].replace(/\\u0026/g, '&'), duration); } catch (_) {} }
+  } catch (_) { /* Netzwerk-/Parsefehler: 0/null zurückgeben */ }
+  const meta = { duration, storyboard };
+  if (duration > 0 || storyboard) ytMetaCache.set(videoId, meta); // nur Treffer cachen
+  return meta;
+}
+async function probeYouTubeDuration(videoId) {
+  return (await loadYtMeta(videoId)).duration;
+}
+
+// Echte Gesamtlänge eines Content-Objekts ermitteln (nur für "end"-Modus relevant).
+async function contentDuration(c) {
+  if (!c) return 0;
+  if (c.type === 'video' && c.filename) return probeDuration(c.filename);
+  if (c.type === 'youtube' && c.videoId) return probeYouTubeDuration(c.videoId);
+  return 0;
+}
+
+// Fehlende videoDuration für alle Video/YouTube-Items (Modus "end") nachtragen.
+// Schreibt nur bei Änderungen (saveState + broadcast). Reentrancy-Guard verhindert
+// parallele Doppelläufe. Liefert die Anzahl aktualisierter Items.
+let ensuringDurations = false;
+async function ensureDurations() {
+  if (ensuringDurations) return 0;
+  ensuringDurations = true;
+  let updated = 0;
+  try {
+    const byId = state.playlists?.byId || {};
+    for (const pl of Object.values(byId)) {
+      for (const it of (pl.items || [])) {
+        const c = it.kind === 'content' ? it.content : null;
+        if (!c || (c.type !== 'video' && c.type !== 'youtube')) continue;
+        if (c.videoMode === 'duration') continue;
+        if (typeof c.videoDuration === 'number' && c.videoDuration > 0) continue;
+        const d = await contentDuration(c);
+        if (d > 0) { c.videoDuration = d; updated++; }
+      }
+    }
+    if (updated) { saveState(); broadcast(); }
+  } finally {
+    ensuringDurations = false;
+  }
+  return updated;
+}
+
 let state = loadState(); // Entwurf
 let live = loadLive() || structuredClone(state); // Live (Wand)
 // "Off Air": die Wand wird komplett gestoppt (schwarz). Separat gehalten, damit es
@@ -566,7 +666,7 @@ app.delete('/api/playlist/:id', (req, res) => {
 
 // Item (Content oder Sub-Playlist) zu einer Playlist hinzufügen.
 // Body: { kind:'content', content:{...} } oder { kind:'playlist', refId, index? }.
-app.post('/api/playlist/:id/items', (req, res) => {
+app.post('/api/playlist/:id/items', async (req, res) => {
   const pl = getPlaylist(req.params.id);
   if (!pl) return res.status(404).json({ error: 'Playlist nicht gefunden' });
   const body = req.body || {};
@@ -580,6 +680,12 @@ app.post('/api/playlist/:id/items', (req, res) => {
     item = { id: newId(), kind: 'playlist', refId };
   } else {
     item = { id: newId(), kind: 'content', content: normalizeContent(body.content) };
+    // Echte Länge direkt ermitteln (YouTube/Upload, Modus "end"), damit das Scrubboard
+    // den Block sofort korrekt darstellt. Best-Effort – Fehler/0 werden ignoriert.
+    const c = item.content;
+    if ((c.type === 'youtube' || c.type === 'video') && c.videoMode !== 'duration' && !(c.videoDuration > 0)) {
+      try { const d = await contentDuration(c); if (d > 0) c.videoDuration = d; } catch (_) {}
+    }
   }
   const index = Number.isInteger(body.index) ? Math.max(0, Math.min(pl.items.length, body.index)) : pl.items.length;
   pl.items.splice(index, 0, item);
@@ -699,6 +805,30 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
   saveState();
   broadcast();
   res.json(item);
+});
+
+// Fehlende Video-/YouTube-Längen nachtragen (vom Scrubboard beim Laden angestoßen).
+app.post('/api/probe-durations', async (req, res) => {
+  try {
+    const updated = await ensureDurations();
+    res.json({ ok: true, updated });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// YouTube-Storyboard (Scrubbing-Vorschaubilder) für den Filmstreifen im Scrubboard.
+app.get('/api/yt-storyboard', async (req, res) => {
+  const id = (req.query.id || '').toString();
+  if (!/^[\w-]{6,}$/.test(id)) return res.status(400).json({ ok: false, error: 'bad id' });
+  try {
+    const { storyboard } = await loadYtMeta(id);
+    if (!storyboard) return res.json({ ok: false });
+    res.set('Cache-Control', 'public, max-age=86400');
+    res.json({ ok: true, ...storyboard });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 // --- Webseiten-Content: Einbettbarkeit prüfen + an Playlist anhängen --------
@@ -1036,4 +1166,6 @@ server.listen(PORT, HOST, () => {
     console.log(`              http://${ip}:${PORT}/screen  (Anzeige)`);
   }
   console.log('');
+  // Fehlende Video-/YouTube-Längen im Hintergrund nachtragen (für korrektes Scrubboard).
+  ensureDurations().then((n) => { if (n) console.log(`  ${n} Video-Länge(n) ermittelt.`); }).catch(() => {});
 });
