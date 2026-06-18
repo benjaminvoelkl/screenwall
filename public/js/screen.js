@@ -55,6 +55,8 @@
         else if (msg.type === 'cmd' && msg.cmd === 'play') previewPlay();
         else if (msg.type === 'cmd' && msg.cmd === 'nowplaying') { if (viewer === 'monitor') applyNowPlaying(msg); }
         else if (msg.type === 'cmd' && msg.cmd === 'element') applyElementPatch(msg.eid, msg.patch);
+        else if (msg.type === 'cmd' && msg.cmd === 'flash') applyFlash(msg.id, msg.element, msg.ms);
+        else if (msg.type === 'cmd' && msg.cmd === 'flash-clear') clearFlash(msg.id);
         else if (msg.type === 'cmd' && msg.cmd === 'sync-request') { if (viewer === 'wall') sendNowPlaying(); }
       } catch (_) { /* ignorieren */ }
     });
@@ -215,6 +217,38 @@
     return box;
   }
   const pct = (v) => `${(v || 0) * 100}%`;
+
+  // ===== Flash: Inhalt für N Sekunden über allem einblenden (POST /api/flash) =====
+  let flashLayer = null;
+  const flashTimers = {};
+  function flashRoot() {
+    if (!flashLayer) {
+      flashLayer = document.createElement('div');
+      flashLayer.style.cssText = 'position:fixed;inset:0;z-index:600;pointer-events:none;';
+      document.body.appendChild(flashLayer);
+    }
+    return flashLayer;
+  }
+  function applyFlash(id, element, ms) {
+    if (!element) return;
+    const key = id || 'flash';
+    clearFlash(key);
+    const box = buildElement(element); // .ov-el, per % positioniert
+    box.dataset.flashId = key;
+    flashRoot().appendChild(box);
+    flashTimers[key] = setTimeout(() => { box.remove(); delete flashTimers[key]; }, Math.max(500, ms || 8000));
+  }
+  function clearFlash(id) {
+    const root = flashRoot();
+    if (id) {
+      if (flashTimers[id]) { clearTimeout(flashTimers[id]); delete flashTimers[id]; }
+      root.querySelectorAll(`[data-flash-id="${id}"]`).forEach((n) => n.remove());
+    } else {
+      Object.values(flashTimers).forEach(clearTimeout);
+      for (const k in flashTimers) delete flashTimers[k];
+      root.innerHTML = '';
+    }
+  }
 
   // Dynamische Quelle (Phase 1): periodisch über den Server-Proxy /api/fetch laden.
   function bindDynamic(e, apply) {

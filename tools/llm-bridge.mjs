@@ -33,7 +33,9 @@ const tools = [
   { name: 'add_element', description: 'Element zu einem Overlay hinzufügen (text/image/qr/shape). Positionen 0..1. QR: type="qr" + qrMode (url|wifi|contact) und passende Felder (url; ssid/password/encryption/hidden; cname/phone/email/org). NUR ENTWURF → danach go_live.', input_schema: { type: 'object', properties: { overlayId: { type: 'string' }, element: { type: 'object', properties: { type: { type: 'string', enum: ['text', 'image', 'qr', 'shape'] }, text: { type: 'string' }, color: { type: 'string' }, align: { type: 'string' }, fontFrac: { type: 'number' }, url: { type: 'string' }, qrMode: { type: 'string', enum: ['url', 'wifi', 'contact'] }, ssid: { type: 'string' }, password: { type: 'string' }, encryption: { type: 'string', enum: ['WPA', 'WEP', 'nopass'] }, hidden: { type: 'boolean' }, cname: { type: 'string' }, phone: { type: 'string' }, email: { type: 'string' }, org: { type: 'string' }, fg: { type: 'string' }, bg: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' }, w: { type: 'number' }, h: { type: 'number' } }, required: ['type'] } }, required: ['overlayId', 'element'] } },
   { name: 'update_element', description: 'Element-Struktur/Stil ändern (Position/Größe/Farbe/Schrift; bg="" entfernt die Textfläche). NUR ENTWURF → danach go_live.', input_schema: { type: 'object', properties: { overlayId: { type: 'string' }, eid: { type: 'string' }, element: { type: 'object' } }, required: ['overlayId', 'eid', 'element'] } },
   { name: 'delete_element', description: 'Element aus einem Overlay entfernen (z. B. Banner-Fläche/Logos). NUR ENTWURF → danach go_live.', input_schema: { type: 'object', properties: { overlayId: { type: 'string' }, eid: { type: 'string' } }, required: ['overlayId', 'eid'] } },
-  { name: 'remove_overlay_window', description: 'Overlay-Fenster (Clip) aus einer Playlist entfernen → Overlay dort nicht mehr zeigen. clipId aus list_playlists/get_status. NUR ENTWURF → danach go_live.', input_schema: { type: 'object', properties: { playlistId: { type: 'string' }, clipId: { type: 'string' } }, required: ['playlistId', 'clipId'] } }
+  { name: 'remove_overlay_window', description: 'Overlay-Fenster (Clip) aus einer Playlist entfernen → Overlay dort nicht mehr zeigen. clipId aus list_playlists/get_status. NUR ENTWURF → danach go_live.', input_schema: { type: 'object', properties: { playlistId: { type: 'string' }, clipId: { type: 'string' } }, required: ['playlistId', 'clipId'] } },
+  { name: 'flash', description: 'Inhalt SOFORT für N Sekunden zentriert einblenden, verschwindet selbst (kein go_live). Genau eins von qr/text/image. Für "zeig … jetzt für X Sekunden".', input_schema: { type: 'object', properties: { qr: { type: 'string' }, text: { type: 'string' }, image: { type: 'string' }, seconds: { type: 'number' }, color: { type: 'string' }, pos: { type: 'string', enum: ['center', 'top', 'bottom'] } } } },
+  { name: 'flash_clear', description: 'Laufende Flash-Einblendungen entfernen (Body {} = alle).', input_schema: { type: 'object', properties: { id: { type: 'string' } } } }
 ];
 
 const enc = encodeURIComponent;
@@ -54,7 +56,9 @@ const ROUTES = {
   add_element: (i) => ['POST', `/api/overlay/${enc(i.overlayId)}/element`, { element: i.element }],
   update_element: (i) => ['PATCH', `/api/overlay/${enc(i.overlayId)}/element/${enc(i.eid)}`, { element: i.element }],
   delete_element: (i) => ['DELETE', `/api/overlay/${enc(i.overlayId)}/element/${enc(i.eid)}`],
-  remove_overlay_window: (i) => ['DELETE', `/api/playlist/${enc(i.playlistId)}/overlay-clips/${enc(i.clipId)}`]
+  remove_overlay_window: (i) => ['DELETE', `/api/playlist/${enc(i.playlistId)}/overlay-clips/${enc(i.clipId)}`],
+  flash: (i) => ['POST', '/api/flash', pick(i, ['qr', 'text', 'image', 'element', 'seconds', 'color', 'pos'])],
+  flash_clear: (i) => ['POST', '/api/flash/clear', pick(i, ['id'])]
 };
 
 async function callWall(name, input) {

@@ -107,9 +107,20 @@ Antwort: die neue Playlist (`{ id, name, items, ... }`). Danach mit `/api/play` 
 ```
 Element-IDs bekommst du über `GET /api/overlays`.
 
+### Inhalt kurz einblenden (Flash, N Sekunden) – „zeig … jetzt für 10 s"
+`POST /api/flash` – blendet Inhalt **sofort live** für `seconds` Sekunden ein (zentriert),
+entfernt sich selbst wieder. **Kein go_live, keine bleibende Struktur.** Body genau eins von:
+- `{ "qr": "www.example.com", "seconds": 10 }` – QR (String = URL; oder Objekt mit
+  `qrMode`/Feldern wie bei QR-Elementen, z. B. WLAN/Kontakt)
+- `{ "text": "TOR!", "seconds": 5, "color": "#ffffff" }` – großer Text
+- `{ "image": "https://…/logo.png", "seconds": 8 }` – Bild (URL)
+- `{ "element": { …volles Overlay-Element inkl. x/y/w/h… }, "seconds": 8 }` – volle Kontrolle
+Optional `"pos"`: `center` (Standard) | `top` | `bottom`. Antwort `{ ok, id, seconds }`.
+Abbrechen: `POST /api/flash/clear` (Body `{}` = alle, oder `{ "id":"…" }`).
+
 ### Overlays auflisten (inkl. Element-IDs)
 `GET /api/overlays` → `{ overlays: [ { id, name, blur, elements: [ { id, type, text, url,
-filename, data } ] } ] }`
+filename, data, qrMode } ] } ] }`
 
 ### Overlay-Fenster (Clip) in einer Playlist setzen / verschieben
 Ein Overlay wird in einer Playlist über **Clips** (Zeitfenster) sichtbar; mehrere Fenster
@@ -178,7 +189,9 @@ Beispiel „WLAN-QR oben rechts ins Overlay":
    (optional Overlay einblenden via `add_overlay_window`) → `play {playlistId}` (veröffentlicht).
 5. **„Banner weg, nur Text"** → `list_overlays` (Element-IDs) → `delete_element` für Fläche/Logos,
    `update_element {bg:""}` für die Textfläche **→ go_live** (sonst bleibt es auf der Wand!).
-6. **„Blende die Wand aus"** → `set_offair {off:true}`.
+6. **„Zeig jetzt einen QR mit www.ip3-energie.de mittig für 10 Sekunden"** →
+   `flash {qr:"www.ip3-energie.de", seconds:10}` (sofort, kein go_live, verschwindet selbst).
+7. **„Blende die Wand aus"** → `set_offair {off:true}`.
 
 ## Hinweise für die KI
 - **Live vs. Entwurf beachten** (siehe Abschnitt oben): nach Struktur-/Overlay-Bearbeitungen
@@ -313,6 +326,22 @@ für OpenAI `input_schema` → `parameters` umbenennen und in `{ "type":"functio
     "input_schema": { "type": "object", "properties": { "name": { "type": "string" } } }
   },
   {
+    "name": "flash",
+    "description": "Inhalt SOFORT für N Sekunden zentriert einblenden, entfernt sich selbst (kein go_live). Genau eins von qr/text/image angeben. POST /api/flash. Für 'zeig … jetzt für X Sekunden'.",
+    "input_schema": { "type": "object", "properties": {
+      "qr": { "type": "string", "description": "URL/Inhalt für einen QR-Code" },
+      "text": { "type": "string" }, "image": { "type": "string", "description": "Bild-URL" },
+      "seconds": { "type": "number", "description": "Anzeigedauer, Standard 8" },
+      "color": { "type": "string", "description": "Textfarbe" },
+      "pos": { "type": "string", "enum": ["center","top","bottom"] }
+    } }
+  },
+  {
+    "name": "flash_clear",
+    "description": "Laufende Flash-Einblendungen entfernen. POST /api/flash/clear (Body {} = alle).",
+    "input_schema": { "type": "object", "properties": { "id": { "type": "string" } } }
+  },
+  {
     "name": "remove_overlay_window",
     "description": "Ein Overlay-Fenster (Clip) aus einer Playlist entfernen → Overlay wird dort nicht mehr gezeigt. clipId aus list_playlists (overlays[].windows[].clipId) oder get_status (overlaysActive[].clipId). NUR ENTWURF → danach go_live. DELETE /api/playlist/{playlistId}/overlay-clips/{clipId}.",
     "input_schema": { "type": "object", "properties": { "playlistId": { "type": "string" }, "clipId": { "type": "string" } }, "required": ["playlistId","clipId"] }
@@ -330,4 +359,5 @@ Mapping Tool → HTTP (Pfadparameter aus den Argumenten, Rest als JSON-Body):
 `add_element`→`POST /api/overlay/{overlayId}/element` (Body `{element}`) ·
 `update_element`→`PATCH /api/overlay/{overlayId}/element/{eid}` (Body `{element}`) ·
 `delete_element`→`DELETE /api/overlay/{overlayId}/element/{eid}` ·
-`remove_overlay_window`→`DELETE /api/playlist/{playlistId}/overlay-clips/{clipId}`.
+`remove_overlay_window`→`DELETE /api/playlist/{playlistId}/overlay-clips/{clipId}` ·
+`flash`→`POST /api/flash` · `flash_clear`→`POST /api/flash/clear`.

@@ -870,6 +870,38 @@ app.get('/api/status', (req, res) => {
   });
 });
 
+// Inhalt sofort für N Sekunden einblenden ("Flash"): live, ohne bleibende Struktur, ohne
+// go_live; entfernt sich auf der Wand selbst. Body (eins von): { qr | text | image | element },
+// dazu { seconds?, color?, pos? }. Standard: zentriert.
+function flashCenter(el, pos) {
+  // Quadratische Pixel für QR (Canvas-Seitenverhältnis 4320:3840).
+  if (el.type === 'qr') { el.w = el.w || 0.3; el.h = el.w * 4320 / 3840; }
+  else if (el.type === 'text') { el.w = 0.86; el.h = el.h || 0.2; }
+  else { el.w = el.w || 0.5; el.h = el.h || 0.4; }
+  el.x = (1 - el.w) / 2;
+  if (pos === 'top') el.y = 0.06; else if (pos === 'bottom') el.y = 0.94 - el.h; else el.y = (1 - el.h) / 2;
+}
+app.post('/api/flash', (req, res) => {
+  const b = req.body || {};
+  let el;
+  if (b.element && typeof b.element === 'object') el = normalizeElement(b.element);
+  else if (b.qr !== undefined) { const q = (typeof b.qr === 'object' && b.qr) ? b.qr : { qrMode: 'url', url: String(b.qr) }; el = normalizeElement({ type: 'qr', ...q }); }
+  else if (typeof b.text === 'string') el = normalizeElement({ type: 'text', text: b.text, color: b.color || '#ffffff', align: 'center', fontFrac: 0.5 });
+  else if (typeof b.image === 'string') el = normalizeElement({ type: 'image', url: b.image, fit: 'contain' });
+  else return res.status(400).json({ error: 'Body braucht eins von: qr | text | image | element' });
+  const hasPos = b.element && typeof b.element === 'object' && ('x' in b.element || 'y' in b.element);
+  if (!hasPos) flashCenter(el, b.pos);
+  const seconds = Math.max(1, Math.min(600, Number(b.seconds) || 8));
+  const id = newId();
+  sendToScreens({ type: 'cmd', cmd: 'flash', id, element: el, ms: seconds * 1000 });
+  res.json({ ok: true, id, seconds });
+});
+// Laufende Flashs entfernen. Body optional { id }.
+app.post('/api/flash/clear', (req, res) => {
+  sendToScreens({ type: 'cmd', cmd: 'flash-clear', id: (req.body && req.body.id) || null });
+  res.json({ ok: true });
+});
+
 // Overlays als JSON (inkl. Element-IDs für die Live-Befüllung via POST /api/element/:eid).
 app.get('/api/overlays', (req, res) => {
   res.json({
