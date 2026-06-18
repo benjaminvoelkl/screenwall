@@ -51,7 +51,7 @@ if (!existsSync(THUMB_DIR)) mkdirSync(THUMB_DIR, { recursive: true });
 // ---------------------------------------------------------------------------
 const CONTENT_TYPES = ['color', 'image', 'video', 'youtube', 'webpage', 'screenshare'];
 // Overlay-Elementtypen (liegen ÜBER dem Content; frei auf dem Ausgabe-Canvas platziert).
-const ELEMENT_TYPES = ['text', 'image', 'qr'];
+const ELEMENT_TYPES = ['text', 'image', 'qr', 'shape'];
 
 const DEFAULT_STATE = {
   // Playlists als flache Registry (byId) + Wurzel-Playlist (rootId).
@@ -62,7 +62,9 @@ const DEFAULT_STATE = {
     }
   },
   // Overlays: mehrere Zeit-Clips über dem Content (Array = Z-Ordnung, 0 = unten).
-  overlays: []
+  overlays: [],
+  // Wiederverwertbare Element-Vorlagen (Flächen/Texte/Bilder, einzeln oder als Gruppe).
+  library: []
 };
 
 const newId = () => randomUUID();
@@ -180,6 +182,25 @@ function normalizeSource(s) {
   };
 }
 
+// Gemeinsamer Flächen-Stil (für Shape-Elemente und als Hintergrund von Text):
+// Deckkraft der Füllung, Rand (an/aus, Breite, Farbe), Blur (Hintergrund „frosted glass"
+// oder Eigen-Weichzeichnung), Eckenradius (px) und Innenabstand (Anteil der Elementhöhe).
+function normalizeSurface(e) {
+  const b = (e && typeof e.border === 'object') ? e.border : {};
+  return {
+    fillOpacity: clamp01(e.fillOpacity, 1),
+    border: {
+      enabled: !!b.enabled,
+      width: (typeof b.width === 'number' && b.width >= 0) ? b.width : 4,
+      color: typeof b.color === 'string' ? b.color : '#000000'
+    },
+    blur: (typeof e.blur === 'number' && e.blur >= 0) ? e.blur : 0,
+    blurMode: e.blurMode === 'self' ? 'self' : 'backdrop',
+    radius: (typeof e.radius === 'number' && e.radius >= 0) ? e.radius : 0,
+    pad: (typeof e.pad === 'number' && e.pad >= 0) ? Math.min(0.5, e.pad) : 0
+  };
+}
+
 // Ein Overlay-Element: Position/Größe als Bruchteile (0..1) des Ausgabebilds.
 function normalizeElement(e) {
   e = (e && typeof e === 'object') ? e : {};
@@ -194,10 +215,11 @@ function normalizeElement(e) {
   if (type === 'text') {
     out.text = typeof e.text === 'string' ? e.text : '';
     out.color = typeof e.color === 'string' ? e.color : '#ffffff';
-    out.bg = typeof e.bg === 'string' ? e.bg : '';            // '' = transparent
+    out.bg = typeof e.bg === 'string' ? e.bg : '';            // '' = transparent (Füllfarbe der Fläche)
     out.align = ['left', 'center', 'right'].includes(e.align) ? e.align : 'center';
     out.weight = typeof e.weight === 'number' ? e.weight : 700;
     out.fontFrac = (typeof e.fontFrac === 'number' && e.fontFrac > 0) ? e.fontFrac : 0.5; // Anteil der Elementhöhe
+    Object.assign(out, normalizeSurface(e)); // Flächen-Stil hinter dem Text (Rand/Radius/Blur/Deckkraft)
   } else if (type === 'image') {
     out.filename = typeof e.filename === 'string' ? e.filename : null;
     out.url = typeof e.url === 'string' ? e.url : '';
@@ -206,9 +228,29 @@ function normalizeElement(e) {
     out.data = typeof e.data === 'string' ? e.data : '';
     out.fg = typeof e.fg === 'string' ? e.fg : '#000000';
     out.bg = typeof e.bg === 'string' ? e.bg : '#ffffff';
+  } else if (type === 'shape') {
+    out.shape = e.shape === 'circle' ? 'circle' : 'rect';
+    out.fill = typeof e.fill === 'string' ? e.fill : '#ffffff';
+    Object.assign(out, normalizeSurface(e));
   }
   return out;
 }
+
+// Bibliothek: wiederverwertbare Vorlagen – ein Einzelelement oder eine Gruppe von
+// Elementen (mit ihren relativen Positionen). Bilder referenzieren wie gehabt uploads/.
+function normalizeLibEntry(en) {
+  en = (en && typeof en === 'object') ? en : {};
+  const kind = en.kind === 'group' ? 'group' : 'element';
+  const out = {
+    id: typeof en.id === 'string' ? en.id : newId(),
+    name: (typeof en.name === 'string' && en.name.trim()) ? en.name.trim() : (kind === 'group' ? 'Gruppe' : 'Element'),
+    kind
+  };
+  if (kind === 'group') out.elements = Array.isArray(en.elements) ? en.elements.map(normalizeElement) : [];
+  else out.element = normalizeElement(en.element || {});
+  return out;
+}
+function normalizeLibrary(arr) { return Array.isArray(arr) ? arr.map(normalizeLibEntry) : []; }
 
 function normalizeOverlay(o) {
   o = (o && typeof o === 'object') ? o : {};
@@ -320,7 +362,8 @@ function prepareState(loaded) {
   if (Array.isArray(loaded.overlays)) overlays = normalizeOverlays(loaded.overlays);
   else if (loaded.welcome) overlays = [overlayFromWelcome(loaded.welcome)]; // Migration aus altem welcome
   else overlays = [];
-  return { playlists, overlays };
+  const library = normalizeLibrary(loaded.library);
+  return { playlists, overlays, library };
 }
 
 function loadState() {
@@ -369,6 +412,16 @@ function filesUsedInOverlays(overlays) {
   return set;
 }
 
+// Image-Dateien, die von Bibliotheks-Vorlagen (einzeln oder Gruppe) referenziert werden.
+function filesUsedInLibrary(library) {
+  const set = new Set();
+  for (const en of library || []) {
+    const els = en.kind === 'group' ? (en.elements || []) : (en.element ? [en.element] : []);
+    for (const e of els) if (e.type === 'image' && e.filename) set.add(e.filename);
+  }
+  return set;
+}
+
 // Wird eine Upload-Datei noch irgendwo (Entwurf ODER Live; Contents ODER
 // Overlay-Bilder) referenziert? Verhindert das Löschen noch genutzter Dateien.
 function fileInUse(filename) {
@@ -377,6 +430,8 @@ function fileInUse(filename) {
   if (live && filesUsedInPlaylists(live.playlists).has(filename)) return true;
   if (filesUsedInOverlays(state.overlays).has(filename)) return true;
   if (live && filesUsedInOverlays(live.overlays).has(filename)) return true;
+  if (filesUsedInLibrary(state.library).has(filename)) return true;
+  if (live && filesUsedInLibrary(live.library).has(filename)) return true;
   return false;
 }
 
@@ -582,6 +637,10 @@ app.post('/api/golive', (req, res) => {
   const g = req.body && req.body.goto;
   if (g && typeof g.itemId === 'string') {
     sendToWall({ type: 'cmd', cmd: 'goto', itemId: g.itemId, time: g.time || 0, progTime: g.progTime || 0 });
+    // Cache sofort auf die neue Position setzen, damit neu verbindende Monitore
+    // (z. B. der Live-Mirror nach Go Live) direkt richtig einsteigen und nicht die
+    // alte Position spiegeln, bis der nächste Wand-Heartbeat eintrifft.
+    liveNowPlaying = { cmd: 'nowplaying', contentId: g.itemId, time: g.time || 0, progTime: g.progTime || 0 };
   }
   res.json({ ok: true });
 });
@@ -1029,6 +1088,49 @@ app.post('/api/overlay/:id/element/:eid/image', upload.single('file'), (req, res
   if (old && old !== el.filename) cleanupFile(old);
   broadcast();
   res.json(el);
+});
+
+// --- Bibliothek: wiederverwertbare Element-/Gruppen-Vorlagen ----------------
+// Aktuelle Auswahl als Vorlage speichern. Body: { name, kind, element | elements }.
+app.post('/api/library', (req, res) => {
+  const b = req.body || {};
+  const entry = normalizeLibEntry({ name: b.name, kind: b.kind, element: b.element, elements: b.elements });
+  state.library.push(entry);
+  saveState();
+  broadcast();
+  res.json(entry);
+});
+
+// Bibliotheks-Vorlage löschen (referenzierte Bilder ggf. aufräumen).
+app.delete('/api/library/:id', (req, res) => {
+  const i = state.library.findIndex((en) => en.id === req.params.id);
+  if (i === -1) return res.status(404).json({ error: 'Vorlage nicht gefunden' });
+  const [removed] = state.library.splice(i, 1);
+  saveState();
+  const els = removed.kind === 'group' ? (removed.elements || []) : (removed.element ? [removed.element] : []);
+  for (const e of els) if (e.type === 'image' && e.filename) cleanupFile(e.filename);
+  broadcast();
+  res.json({ ok: true });
+});
+
+// Vorlage in ein Overlay einfügen (neue ids; Gruppe leicht versetzt). Gibt erzeugte
+// Element(e) zurück.
+app.post('/api/overlay/:id/element/from-library/:libId', (req, res) => {
+  const o = getOverlay(req.params.id);
+  if (!o) return res.status(404).json({ error: 'Overlay nicht gefunden' });
+  const en = state.library.find((x) => x.id === req.params.libId);
+  if (!en) return res.status(404).json({ error: 'Vorlage nicht gefunden' });
+  const src = en.kind === 'group' ? (en.elements || []) : (en.element ? [en.element] : []);
+  const off = en.kind === 'group' ? 0.03 : 0; // Gruppe leicht versetzt einfügen
+  const created = src.map((e) => {
+    const el = normalizeElement({ ...e, x: clamp01(e.x + off, e.x), y: clamp01(e.y + off, e.y) });
+    el.id = newId();
+    o.elements.push(el);
+    return el;
+  });
+  saveState();
+  broadcast();
+  res.json(en.kind === 'group' ? created : (created[0] || null));
 });
 
 // --- QR-Code als SVG (offline via qrcode-Paket) -----------------------------

@@ -39,7 +39,7 @@
 
 /* gerenderte Elemente im Canvas */
 .ed-el { position: absolute; overflow: hidden; cursor: move; }
-.ed-el.text { display: flex; line-height: 1.1; word-break: break-word; white-space: pre-wrap;
+.ed-el.text { display: flex; align-items: center; line-height: 1.1; word-break: break-word; white-space: pre-wrap;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; text-shadow: 0 2px 18px rgba(0,0,0,0.45); }
 .ed-el.text.align-left { justify-content: flex-start; text-align: left; }
 .ed-el.text.align-center { justify-content: center; text-align: center; }
@@ -48,9 +48,14 @@
 .ed-el img.contain { object-fit: contain; }
 .ed-el img.cover { object-fit: cover; }
 .ed-el.empty { outline: 2px dashed rgba(255,255,255,0.25); }
+/* Flächen-Stil-Layer hinter dem Inhalt (Füllung/Rand/Radius/Blur). */
+.ed-surface { position: absolute; inset: 0; z-index: 0; box-sizing: border-box; }
+.ed-text-content { position: relative; z-index: 1; width: 100%; }
+.ed-cap { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 2px 0 6px; }
 
 /* Auswahlrahmen + Griffe (in Bühnen-Pixeln, unabhängig vom Canvas-Zoom) */
 .ed-selbox { position: absolute; border: 1.5px solid var(--accent); pointer-events: none; z-index: 20; }
+.ed-selbox.multi { border-style: dashed; }
 .ed-handle {
   position: absolute; width: 12px; height: 12px; background: #fff; border: 1.5px solid var(--accent);
   border-radius: 2px; pointer-events: auto; z-index: 21;

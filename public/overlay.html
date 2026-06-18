@@ -36,13 +36,22 @@
       <!-- Elemente des gewählten Overlays -->
       <div class="ed-box" id="el-box" hidden>
         <h3>Elemente</h3>
-        <div class="ed-row" style="margin-bottom:10px">
+        <div class="ed-row" style="margin-bottom:10px; flex-wrap:wrap">
           <button class="btn tiny" data-add-el="text">+ Text</button>
+          <button class="btn tiny" data-add-el="rect">+ Rechteck</button>
+          <button class="btn tiny" data-add-el="circle">+ Kreis</button>
           <button class="btn tiny" data-add-el="image">+ Bild</button>
           <button class="btn tiny" data-add-el="qr">+ QR-Code</button>
         </div>
         <div id="el-list" class="ed-list"></div>
         <div id="el-props"></div>
+      </div>
+
+      <!-- Wiederverwertbare Bibliothek -->
+      <div class="ed-box" id="lib-box">
+        <h3>Bibliothek</h3>
+        <button id="lib-save" class="btn tiny" hidden>＋ Auswahl in Bibliothek</button>
+        <div id="lib-list" class="ed-list"></div>
       </div>
     </aside>
 

@@ -118,6 +118,41 @@
     updateOverlayVisibility();
   }
 
+  // Hex-Farbe mit Deckkraft als rgba() (lässt den Rand opak, nur die Füllung wird
+  // transparent). Bei Nicht-Hex-Farbe oder Deckkraft 1 wird die Farbe unverändert genutzt.
+  function withAlpha(color, a) {
+    if (a == null || a >= 1) return color;
+    const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(color || '');
+    if (!m) return color;
+    let h = m[1]; if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+    return `rgba(${parseInt(h.slice(0, 2), 16)},${parseInt(h.slice(2, 4), 16)},${parseInt(h.slice(4, 6), 16)},${a})`;
+  }
+  // Flächen-Stil als eigener Layer HINTER dem Inhalt (Füllung/Rand/Radius/Blur), damit
+  // Blur/Hintergrund den Text nicht verwischen. Liefert null, wenn nichts zu zeigen ist.
+  // Längenangaben (Rand/Radius/Blur) sind in Design-Pixeln (Canvas 4320×3840) gedacht
+  // und werden – wie die Schriftgröße – relativ zur Ausgabehöhe in vh umgerechnet.
+  const DESIGN_H = 3840;
+  const dvh = (px) => (px / DESIGN_H * 100) + 'vh';
+  function surfaceEl(e, fillColor) {
+    const border = e.border && e.border.enabled && e.border.width > 0;
+    const blur = e.blur > 0;
+    const isShape = e.type === 'shape';
+    const fill = !!(fillColor && fillColor !== '');
+    if (!isShape && !border && !blur && !fill) return null;
+    const s = document.createElement('div');
+    s.className = 'ov-surface';
+    if (isShape && e.shape === 'circle') s.style.borderRadius = '50%';
+    else if (e.radius > 0) s.style.borderRadius = dvh(e.radius);
+    if (fill) s.style.background = withAlpha(fillColor, e.fillOpacity);
+    if (border) { s.style.borderStyle = 'solid'; s.style.borderColor = e.border.color; s.style.borderWidth = dvh(e.border.width); }
+    if (blur) {
+      const f = `blur(${dvh(e.blur)})`;
+      if (e.blurMode === 'self') s.style.filter = f;
+      else s.style.backdropFilter = s.style.webkitBackdropFilter = f;
+    }
+    return s;
+  }
+
   function buildElement(e) {
     const box = document.createElement('div');
     box.className = `ov-el ov-${e.type}`;
@@ -125,12 +160,20 @@
     box.style.width = pct(e.w); box.style.height = pct(e.h);
     if (e.type === 'text') {
       box.classList.add(`align-${e.align || 'center'}`);
-      box.style.color = e.color || '#fff';
-      box.style.fontWeight = e.weight || 700;
-      box.style.fontSize = `${(e.fontFrac || 0.5) * (e.h || 0.1) * 100}vh`;
-      if (e.bg) box.style.background = e.bg;
-      box.textContent = e.text || '';
-      bindDynamic(e, (val) => { box.textContent = val; });
+      const s = surfaceEl(e, e.bg);
+      if (s) box.appendChild(s);
+      if (e.pad > 0) box.style.padding = `${e.pad * (e.h || 0.1) * 100}vh`;
+      const tx = document.createElement('div');
+      tx.className = 'ov-text-content';
+      tx.style.color = e.color || '#fff';
+      tx.style.fontWeight = e.weight || 700;
+      tx.style.fontSize = `${(e.fontFrac || 0.5) * (e.h || 0.1) * 100}vh`;
+      tx.textContent = e.text || '';
+      box.appendChild(tx);
+      bindDynamic(e, (val) => { tx.textContent = val; });
+    } else if (e.type === 'shape') {
+      const s = surfaceEl(e, e.fill);
+      if (s) box.appendChild(s);
     } else if (e.type === 'image') {
       const img = document.createElement('img');
       img.className = `ov-img ${e.fit || 'contain'}`;
@@ -499,6 +542,10 @@
     idx = i;
     if (!current || current.itemId !== np.contentId) {
       showContent(seq[i], { startSeconds: np.time || 0 });
+    } else if (typeof np.time === 'number' && (current.type === 'youtube' || current.type === 'video')) {
+      // Gleicher Content: Drift gegen die Wand korrigieren (z. B. nach Go Live), damit
+      // der Live-Mirror nicht dauerhaft versetzt bleibt, bis der Content wechselt.
+      if (Math.abs(contentElapsed() - np.time) > 1.2) seekCurrent(np.time);
     }
   }
 
