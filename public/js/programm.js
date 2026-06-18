@@ -77,7 +77,11 @@
     // Play/Pause-Zustand der Vorschau übernehmen, damit Button & Playhead stimmen.
     if (mode === 'draft' && typeof d.paused === 'boolean') syncPlaying(!d.paused);
     const c = b.content;
-    if (dur > 0 && (c.type === 'video' || c.type === 'youtube') && c.videoMode !== 'duration'
+    // Gemessene Dauer nur übernehmen, wenn die echte Länge NICHT bekannt ist
+    // (videoDuration kommt jetzt vom Server) und gerade NICHT gescrubbt wird – sonst
+    // würde ein Re-Layout während des Ziehens die Timeline verschieben/umskalieren.
+    if (dur > 0 && !scrubbing && !(c.videoDuration > 0)
+        && (c.type === 'video' || c.type === 'youtube') && c.videoMode !== 'duration'
         && Math.abs((measured[d.itemId] || 0) - dur) > 0.5) {
       measured[d.itemId] = dur; render(); return;
     }
@@ -100,7 +104,9 @@
 
   function blockDur(itemId, c) {
     if ((c.type === 'video' || c.type === 'youtube') && c.videoMode !== 'duration') {
-      return measured[itemId] || c.videoDuration || NOMINAL_END;
+      // Echte (vom Server geprobte) Länge bevorzugen – stabil, kein Re-Layout beim
+      // Scrubben. Live-Messung nur als Fallback, falls keine Länge bekannt ist.
+      return c.videoDuration || measured[itemId] || NOMINAL_END;
     }
     return Math.max(1, c.durationSec || 6);
   }
