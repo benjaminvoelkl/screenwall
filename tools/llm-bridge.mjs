@@ -27,7 +27,12 @@ const tools = [
   { name: 'list_overlays', description: 'Overlays mit Element-IDs auflisten (für set_element).', input_schema: { type: 'object', properties: {} } },
   { name: 'add_overlay_window', description: 'Ein Overlay in einer Playlist als Zeitfenster einblenden. duration weglassen = bis Programmende.', input_schema: { type: 'object', properties: { playlistId: { type: 'string' }, overlayId: { type: 'string' }, start: { type: 'number' }, duration: { type: 'number' } }, required: ['playlistId', 'overlayId'] } },
   { name: 'set_offair', description: 'Wand schwarz schalten (off=true) oder wieder senden (off=false).', input_schema: { type: 'object', properties: { off: { type: 'boolean' } }, required: ['off'] } },
-  { name: 'set_volume', description: 'Lautstärke der Wand setzen. level 0..1 oder mute="toggle".', input_schema: { type: 'object', properties: { level: { type: 'number' }, mute: { type: 'string' } } } }
+  { name: 'set_volume', description: 'Lautstärke der Wand setzen. level 0..1 oder mute="toggle".', input_schema: { type: 'object', properties: { level: { type: 'number' }, mute: { type: 'string' } } } },
+  { name: 'go_live', description: 'Entwurf auf die Wand veröffentlichen. NACH Struktur-/Overlay-Bearbeitungen aufrufen (sonst bleibt die Wand unverändert). Nur set_element/play/offair/volume wirken ohne go_live.', input_schema: { type: 'object', properties: {} } },
+  { name: 'create_overlay', description: 'Neues leeres Overlay anlegen (danach add_element + add_overlay_window). NUR ENTWURF → danach go_live.', input_schema: { type: 'object', properties: { name: { type: 'string' } } } },
+  { name: 'add_element', description: 'Element zu einem Overlay hinzufügen (z. B. Text). Positionen 0..1. NUR ENTWURF → danach go_live.', input_schema: { type: 'object', properties: { overlayId: { type: 'string' }, element: { type: 'object', properties: { type: { type: 'string', enum: ['text', 'image', 'qr', 'shape'] }, text: { type: 'string' }, color: { type: 'string' }, align: { type: 'string' }, fontFrac: { type: 'number' }, x: { type: 'number' }, y: { type: 'number' }, w: { type: 'number' }, h: { type: 'number' } }, required: ['type'] } }, required: ['overlayId', 'element'] } },
+  { name: 'update_element', description: 'Element-Struktur/Stil ändern (Position/Größe/Farbe/Schrift; bg="" entfernt die Textfläche). NUR ENTWURF → danach go_live.', input_schema: { type: 'object', properties: { overlayId: { type: 'string' }, eid: { type: 'string' }, element: { type: 'object' } }, required: ['overlayId', 'eid', 'element'] } },
+  { name: 'delete_element', description: 'Element aus einem Overlay entfernen (z. B. Banner-Fläche/Logos). NUR ENTWURF → danach go_live.', input_schema: { type: 'object', properties: { overlayId: { type: 'string' }, eid: { type: 'string' } }, required: ['overlayId', 'eid'] } }
 ];
 
 const enc = encodeURIComponent;
@@ -42,7 +47,12 @@ const ROUTES = {
   list_overlays: () => ['GET', '/api/overlays'],
   add_overlay_window: (i) => ['POST', `/api/playlist/${enc(i.playlistId)}/overlay-clips`, pick(i, ['overlayId', 'start', 'duration'])],
   set_offair: (i) => ['POST', '/api/offair', pick(i, ['off'])],
-  set_volume: (i) => ['POST', '/api/volume', pick(i, ['level', 'mute'])]
+  set_volume: (i) => ['POST', '/api/volume', pick(i, ['level', 'mute'])],
+  go_live: () => ['POST', '/api/golive', {}],
+  create_overlay: (i) => ['POST', '/api/overlay', pick(i, ['name'])],
+  add_element: (i) => ['POST', `/api/overlay/${enc(i.overlayId)}/element`, { element: i.element }],
+  update_element: (i) => ['PATCH', `/api/overlay/${enc(i.overlayId)}/element/${enc(i.eid)}`, { element: i.element }],
+  delete_element: (i) => ['DELETE', `/api/overlay/${enc(i.overlayId)}/element/${enc(i.eid)}`]
 };
 
 async function callWall(name, input) {
@@ -61,8 +71,19 @@ async function callWall(name, input) {
 
 const SYSTEM = `Du steuerst eine Video-Wand über eine lokale HTTP-API (die Tools unten).
 Ermittle IDs immer zuerst über list_playlists bzw. list_overlays – erfinde niemals IDs.
-Sende bei play nicht time und percent gleichzeitig. Antworte knapp auf Deutsch und bestätige,
-was du getan hast (oder was schiefging).`;
+
+WICHTIG – Live vs. Entwurf: Die meisten Änderungen (Playlists/Items/Overlay-Clips, sowie
+add_element/update_element/delete_element/create_overlay) landen nur im ENTWURF und werden
+erst auf der Wand sichtbar, wenn du danach go_live aufrufst. Nur set_element, play, set_offair
+und set_volume wirken sofort ohne go_live. Faustregel: nach Struktur-/Overlay-Bearbeitungen
+immer go_live aufrufen.
+
+Videos kommen von YouTube: Es gibt keinen Such-Endpunkt. Wenn der Nutzer etwas „schauen" will
+(Fußball, Musik, Show …), wähle selbst ein passendes YouTube-Video/-Stream, nimm dessen videoId
+und benutze { "type":"youtube", "videoId":"…", "videoMode":"end", "muted":false }.
+
+Element-Positionen sind Bruchteile 0..1 (x,y,w,h). Sende bei play nicht time und percent
+gleichzeitig. Antworte knapp auf Deutsch und bestätige, was du getan hast (oder was schiefging).`;
 
 // ---- Manuelle Tool-Use-Schleife -------------------------------------------
 const messages = []; // bleibt über die Sitzung erhalten (Kontext, IDs)
