@@ -279,6 +279,7 @@
 
   // ===== Playlist-Scheduler ===============================================
   let topId = null;      // aktuelle Top-Playlist (Übertragung)
+  let lastRootId = null; // zuletzt gesehene rootId – erkennt Wechsel der Programm-Playlist
   let seq = [];          // ausgeflachte Content-Liste: [{ itemId, content }]
   let idx = 0;
   let current = null;    // { itemId, type, contentJSON, videoEl }
@@ -332,9 +333,16 @@
   }
 
   // Nach einem Statewechsel: Anzeige möglichst stabil halten (kein Neustart,
-  // wenn der gerade gezeigte Content weiter existiert).
+  // wenn der gerade gezeigte Content weiter existiert). Wurde aber eine NEUE
+  // Programm-Playlist gewählt (rootId geändert), die Übertragung darauf umstellen –
+  // topId folgt sonst nur beim Ketten via after:'next', nicht bei der Auswahl.
   function afterStateRebuild() {
+    const newRoot = state && state.playlists ? state.playlists.rootId : null;
+    const rootChanged = lastRootId !== null && newRoot !== lastRootId;
+    lastRootId = newRoot;
+    if (rootChanged) { topId = newRoot; progBase = 0; }
     rebuild();
+    if (rootChanged && autoAdvance) { idx = 0; seq.length ? showCurrent() : clearStage(); return; }
     const curId = current && current.itemId;
     const found = curId ? seq.findIndex((e) => e.itemId === curId) : -1;
     if (autoAdvance) {
