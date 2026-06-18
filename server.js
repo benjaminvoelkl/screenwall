@@ -694,6 +694,11 @@ app.get('/', (req, res) => {
   res.set('Cache-Control', 'no-cache');
   res.sendFile(join(PUBLIC_DIR, 'index.html'));
 });
+// API-Beschreibung (für Menschen/LLMs) – liegt im Repo-Root, hier ausgeliefert.
+app.get('/API.md', (req, res) => {
+  res.type('text/markdown');
+  res.sendFile(join(__dirname, 'API.md'));
+});
 app.get('/screen', (req, res) => {
   res.set('Cache-Control', 'no-cache');
   res.sendFile(join(PUBLIC_DIR, 'screen.html'));
