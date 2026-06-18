@@ -292,6 +292,11 @@ für OpenAI `input_schema` → `parameters` umbenennen und in `{ "type":"functio
     "name": "create_overlay",
     "description": "Neues (leeres) Overlay anlegen, danach mit add_element befüllen und per add_overlay_window in eine Playlist einblenden. NUR ENTWURF → danach go_live. POST /api/overlay.",
     "input_schema": { "type": "object", "properties": { "name": { "type": "string" } } }
+  },
+  {
+    "name": "remove_overlay_window",
+    "description": "Ein Overlay-Fenster (Clip) aus einer Playlist entfernen → Overlay wird dort nicht mehr gezeigt. clipId aus list_playlists (overlays[].windows[].clipId) oder get_status (overlaysActive[].clipId). NUR ENTWURF → danach go_live. DELETE /api/playlist/{playlistId}/overlay-clips/{clipId}.",
+    "input_schema": { "type": "object", "properties": { "playlistId": { "type": "string" }, "clipId": { "type": "string" } }, "required": ["playlistId","clipId"] }
   }
 ]
 ```
@@ -305,4 +310,5 @@ Mapping Tool → HTTP (Pfadparameter aus den Argumenten, Rest als JSON-Body):
 `go_live`→`POST /api/golive` · `create_overlay`→`POST /api/overlay` ·
 `add_element`→`POST /api/overlay/{overlayId}/element` (Body `{element}`) ·
 `update_element`→`PATCH /api/overlay/{overlayId}/element/{eid}` (Body `{element}`) ·
-`delete_element`→`DELETE /api/overlay/{overlayId}/element/{eid}`.
+`delete_element`→`DELETE /api/overlay/{overlayId}/element/{eid}` ·
+`remove_overlay_window`→`DELETE /api/playlist/{playlistId}/overlay-clips/{clipId}`.
