@@ -141,6 +141,20 @@ Für mehr als nur Text-Setzen (z. B. „Banner weg", neues Text-Overlay, Positio
 > `PATCH /api/overlay/:overlayId/element/:eid` ändert **Struktur/Stil im Entwurf** (braucht
 > Overlay-ID **und** `golive`).
 
+#### QR-Code-Elemente (`type: "qr"`) – Typen URL / WLAN / Kontakt
+Das Feld `qrMode` bestimmt, was kodiert wird; der eigentliche QR-String (`data`) wird daraus
+**automatisch** gebaut – du setzt nur die strukturierten Felder (kein `data` nötig).
+- **`qrMode: "url"`** → `url` (Link). Bsp.: `{ "type":"qr","qrMode":"url","url":"https://example.com" }`
+- **`qrMode: "wifi"`** → `ssid`, `password`, `encryption` (`WPA`|`WEP`|`nopass`), `hidden` (bool).
+  Bsp.: `{ "type":"qr","qrMode":"wifi","ssid":"Gast","password":"geheim","encryption":"WPA" }`
+- **`qrMode: "contact"`** → `cname` (Name), `phone`, `email`, `org`, `url` (vCard).
+  Bsp.: `{ "type":"qr","qrMode":"contact","cname":"Max Mustermann","phone":"+49…","email":"max@x.de" }`
+- Farben: `fg` (Vordergrund), `bg` (Hintergrund). Plus Position `x,y,w,h` (0..1).
+
+Anlegen/ändern wie jedes Element über `add_element` / `update_element` (Entwurf → `go_live`).
+Beispiel „WLAN-QR oben rechts ins Overlay":
+`add_element {overlayId, element:{type:"qr", qrMode:"wifi", ssid:"Gast", password:"geheim", x:0.78,y:0.05,w:0.18,h:0.18}}` → `go_live`.
+
 ### Weitere nützliche Endpunkte
 - `POST /api/playlist/root` `{ "id": "<playlistId>" }` – Playlist als aktiv setzen (ohne Seek).
 - `POST /api/offair` `{ "off": true|false }` – Wand schwarz schalten / wieder senden.
@@ -265,13 +279,18 @@ für OpenAI `input_schema` → `parameters` umbenennen und in `{ "type":"functio
   },
   {
     "name": "add_element",
-    "description": "Element zu einem Overlay hinzufügen (z. B. Text-Overlay). NUR ENTWURF → danach go_live. POST /api/overlay/{overlayId}/element mit { element:{...} }. Positionen 0..1.",
+    "description": "Element zu einem Overlay hinzufügen (text/image/qr/shape). NUR ENTWURF → danach go_live. POST /api/overlay/{overlayId}/element mit { element:{...} }. Positionen 0..1. QR: type='qr' + qrMode (url|wifi|contact) und die passenden Felder (siehe Abschnitt QR-Code-Elemente).",
     "input_schema": { "type": "object", "properties": {
       "overlayId": { "type": "string" },
       "element": { "type": "object", "properties": {
         "type": { "type": "string", "enum": ["text","image","qr","shape"] },
         "text": { "type": "string" }, "color": { "type": "string" }, "align": { "type": "string", "enum": ["left","center","right"] },
-        "fontFrac": { "type": "number" }, "x": { "type": "number" }, "y": { "type": "number" }, "w": { "type": "number" }, "h": { "type": "number" }
+        "fontFrac": { "type": "number" }, "url": { "type": "string" },
+        "qrMode": { "type": "string", "enum": ["url","wifi","contact"] },
+        "ssid": { "type": "string" }, "password": { "type": "string" }, "encryption": { "type": "string", "enum": ["WPA","WEP","nopass"] }, "hidden": { "type": "boolean" },
+        "cname": { "type": "string" }, "phone": { "type": "string" }, "email": { "type": "string" }, "org": { "type": "string" },
+        "fg": { "type": "string" }, "bg": { "type": "string" },
+        "x": { "type": "number" }, "y": { "type": "number" }, "w": { "type": "number" }, "h": { "type": "number" }
       }, "required": ["type"] }
     }, "required": ["overlayId","element"] }
   },

@@ -160,7 +160,7 @@
     const type = b.dataset.addEl;
     const base = { type, x: 0.35, y: 0.4, w: 0.3, h: 0.2 };
     if (type === 'text') Object.assign(base, { text: 'Neuer Text', h: 0.12 });
-    if (type === 'qr') Object.assign(base, { data: 'https://', w: 0.2, h: 0.2 });
+    if (type === 'qr') Object.assign(base, { qrMode: 'url', url: 'https://', w: 0.2, h: 0.2 });
     if (type === 'rect' || type === 'circle') Object.assign(base, {
       type: 'shape', shape: type === 'circle' ? 'circle' : 'rect',
       fill: '#3b82f6', fillOpacity: 1, border: { enabled: true, width: 6, color: '#000000' },
@@ -236,11 +236,32 @@
       box.appendChild(field('oder Bild-URL', textInput(e.url || '', (v) => patchEl({ url: v }))));
       box.appendChild(field('Skalierung', selectInput([['contain', 'Einpassen'], ['cover', 'Füllen']], e.fit, (v) => patchEl({ fit: v }))));
     } else if (e.type === 'qr') {
-      box.appendChild(field('Inhalt / URL', textInput(e.data || '', (v) => patchEl({ data: v }))));
-      const g = el('div', 'ed-grid2');
-      g.appendChild(field('Vordergrund', colorInput(e.fg || '#000000', (v) => patchEl({ fg: v }))));
-      g.appendChild(field('Hintergrund', colorInput(e.bg || '#ffffff', (v) => patchEl({ bg: v }))));
-      box.appendChild(g);
+      const mode = e.qrMode || 'url';
+      box.appendChild(field('QR-Typ', selectInput([['url', 'URL/Link'], ['wifi', 'WLAN'], ['contact', 'Kontakt']], mode, (v) => patchEl({ qrMode: v }))));
+      if (mode === 'wifi') {
+        box.appendChild(field('Netzwerk (SSID)', textInput(e.ssid || '', (v) => patchEl({ ssid: v }))));
+        box.appendChild(field('Passwort', textInput(e.password || '', (v) => patchEl({ password: v }))));
+        const g = el('div', 'ed-grid2');
+        g.appendChild(field('Verschlüsselung', selectInput([['WPA', 'WPA/WPA2'], ['WEP', 'WEP'], ['nopass', 'offen']], e.encryption || 'WPA', (v) => patchEl({ encryption: v }))));
+        g.appendChild(field('Verstecktes Netz', checkboxInput(!!e.hidden, (v) => patchEl({ hidden: v }))));
+        box.appendChild(g);
+      } else if (mode === 'contact') {
+        box.appendChild(field('Name', textInput(e.cname || '', (v) => patchEl({ cname: v }))));
+        const g = el('div', 'ed-grid2');
+        g.appendChild(field('Telefon', textInput(e.phone || '', (v) => patchEl({ phone: v }))));
+        g.appendChild(field('E-Mail', textInput(e.email || '', (v) => patchEl({ email: v }))));
+        box.appendChild(g);
+        const g2 = el('div', 'ed-grid2');
+        g2.appendChild(field('Firma', textInput(e.org || '', (v) => patchEl({ org: v }))));
+        g2.appendChild(field('Webseite', textInput(e.url || '', (v) => patchEl({ url: v }))));
+        box.appendChild(g2);
+      } else {
+        box.appendChild(field('URL / Link', textInput(e.url || e.data || '', (v) => patchEl({ url: v }))));
+      }
+      const gc = el('div', 'ed-grid2');
+      gc.appendChild(field('Vordergrund', colorInput(e.fg || '#000000', (v) => patchEl({ fg: v }))));
+      gc.appendChild(field('Hintergrund', colorInput(e.bg || '#ffffff', (v) => patchEl({ bg: v }))));
+      box.appendChild(gc);
     }
     // Position/Größe (in %)
     const pg = el('div', 'ed-grid2');

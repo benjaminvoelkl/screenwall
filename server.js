@@ -202,6 +202,28 @@ function normalizeSurface(e) {
   };
 }
 
+// Kodierten QR-String aus den strukturierten Feldern bauen (url|wifi|contact).
+function buildQrData(e) {
+  if (e.qrMode === 'wifi') {
+    if (!e.ssid) return '';
+    const esc = (s) => String(s || '').replace(/([\\;,:"])/g, '\\$1');
+    const enc = e.encryption || 'WPA';
+    return `WIFI:T:${enc};S:${esc(e.ssid)};P:${enc === 'nopass' ? '' : esc(e.password)};${e.hidden ? 'H:true;' : ''};`;
+  }
+  if (e.qrMode === 'contact') {
+    if (!e.cname && !e.phone && !e.email) return '';
+    const lines = ['BEGIN:VCARD', 'VERSION:3.0'];
+    if (e.cname) lines.push(`FN:${e.cname}`, `N:${e.cname};;;`);
+    if (e.org) lines.push(`ORG:${e.org}`);
+    if (e.phone) lines.push(`TEL:${e.phone}`);
+    if (e.email) lines.push(`EMAIL:${e.email}`);
+    if (e.url) lines.push(`URL:${e.url}`);
+    lines.push('END:VCARD');
+    return lines.join('\n');
+  }
+  return typeof e.url === 'string' ? e.url : ''; // url-Modus (Standard)
+}
+
 // Ein Overlay-Element: Position/Größe als Bruchteile (0..1) des Ausgabebilds.
 function normalizeElement(e) {
   e = (e && typeof e === 'object') ? e : {};
@@ -226,9 +248,23 @@ function normalizeElement(e) {
     out.url = typeof e.url === 'string' ? e.url : '';
     out.fit = e.fit === 'cover' ? 'cover' : 'contain';
   } else if (type === 'qr') {
-    out.data = typeof e.data === 'string' ? e.data : '';
+    // QR-Typ: url | wifi | contact. Der tatsächlich kodierte String (data) wird aus den
+    // strukturierten Feldern gebaut; bei leerem Ergebnis bleibt ein evtl. gesetztes data
+    // (Rohwert/Altbestand) erhalten. Wand/QR-Endpunkt nutzen weiterhin nur `data`.
+    out.qrMode = ['url', 'wifi', 'contact'].includes(e.qrMode) ? e.qrMode : 'url';
     out.fg = typeof e.fg === 'string' ? e.fg : '#000000';
     out.bg = typeof e.bg === 'string' ? e.bg : '#ffffff';
+    out.url = typeof e.url === 'string' ? e.url : '';              // url-Modus
+    out.ssid = typeof e.ssid === 'string' ? e.ssid : '';          // wifi
+    out.password = typeof e.password === 'string' ? e.password : '';
+    out.encryption = ['WPA', 'WEP', 'nopass'].includes(e.encryption) ? e.encryption : 'WPA';
+    out.hidden = !!e.hidden;
+    out.cname = typeof e.cname === 'string' ? e.cname : '';        // contact (Name)
+    out.phone = typeof e.phone === 'string' ? e.phone : '';
+    out.email = typeof e.email === 'string' ? e.email : '';
+    out.org = typeof e.org === 'string' ? e.org : '';
+    const computed = buildQrData(out);
+    out.data = computed || (typeof e.data === 'string' ? e.data : '');
   } else if (type === 'shape') {
     out.shape = e.shape === 'circle' ? 'circle' : 'rect';
     out.fill = typeof e.fill === 'string' ? e.fill : '#ffffff';
@@ -839,7 +875,7 @@ app.get('/api/overlays', (req, res) => {
   res.json({
     overlays: (state.overlays || []).map((o) => ({
       id: o.id, name: o.name, blur: o.blur,
-      elements: (o.elements || []).map((e) => ({ id: e.id, type: e.type, text: e.text, url: e.url, filename: e.filename, data: e.data }))
+      elements: (o.elements || []).map((e) => ({ id: e.id, type: e.type, text: e.text, url: e.url, filename: e.filename, data: e.data, qrMode: e.qrMode }))
     }))
   });
 });
