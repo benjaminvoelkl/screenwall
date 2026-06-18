@@ -295,103 +295,128 @@
     return strip;
   }
 
-  // Eine Lane (+ Gutter-Label) pro Overlay; jeder Clip ist verschiebbar (start),
-  // trimmbar (duration), ein-/ausblendbar (enabled) und öffnet per Klick den Editor.
+  // Overlay-Spuren der AKTUELLEN (Root-)Playlist: ein Overlay ist wiederverwendbarer
+  // Inhalt; seine Anzeigefenster liegen als Clips an der Playlist (mehrere je Overlay).
+  // Jeder Clip ist verschiebbar (start), trimmbar (duration), ein-/ausblendbar, löschbar
+  // und öffnet per Klick den Overlay-Editor.
   const el2 = (t, c) => { const n = document.createElement(t); if (c) n.className = c; return n; };
-  function apiPatchOverlay(id, fields) {
-    fetch(`/api/overlay/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(fields) });
+  const rootPlaylist = () => state.playlists.byId[state.playlists.rootId];
+  function apiPatchClip(clipId, fields) {
+    fetch(`/api/playlist/${state.playlists.rootId}/overlay-clips/${clipId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(fields) });
+  }
+  function apiDeleteClip(clipId) {
+    fetch(`/api/playlist/${state.playlists.rootId}/overlay-clips/${clipId}`, { method: 'DELETE' });
+  }
+  function apiAddClip(overlayId, start) {
+    return fetch(`/api/playlist/${state.playlists.rootId}/overlay-clips`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ overlayId, start: Math.max(0, start || 0), duration: null }) });
   }
   function renderOverlayLanes() {
     const gut = $('ov-gutter'), lanes = $('ov-lanes');
     gut.innerHTML = ''; lanes.innerHTML = '';
-    const ovs = (state.overlays) || [];
-    if (!ovs.length) {
+    const pl = rootPlaylist();
+    const clips = (pl && pl.overlayClips) || [];
+    // Picker mit allen vorhandenen Overlays füllen.
+    const pick = $('tl-ov-pick');
+    if (pick && document.activeElement !== pick) {
+      pick.innerHTML = '';
+      for (const o of (state.overlays || [])) { const op = el2('option'); op.value = o.id; op.textContent = o.name; pick.appendChild(op); }
+    }
+    // Clips nach Overlay gruppieren (Reihenfolge wie state.overlays).
+    const groups = [];
+    for (const o of (state.overlays || [])) { const cs = clips.filter((c) => c.overlayId === o.id); if (cs.length) groups.push({ o, clips: cs }); }
+    if (!groups.length) {
       const gl = el2('div', 'tl-gutter-label'); gl.innerHTML = '<span class="ic">✦</span> Overlay';
       gut.appendChild(gl);
-      const lane = el2('div', 'tl-lane empty'); lane.textContent = 'Keine Overlays – „✦ + Overlay"';
+      const lane = el2('div', 'tl-lane empty'); lane.textContent = 'Keine Overlay-Fenster – oben „+ Fenster" / „✦ + Overlay"';
       lanes.appendChild(lane);
       return;
     }
-    ovs.forEach((o) => {
+    for (const g of groups) {
       const gl = el2('div', 'tl-gutter-label');
       const ic = el2('span', 'ic'); ic.textContent = '✦';
-      const nm = el2('span'); nm.textContent = o.name; nm.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
-      gl.append(ic, nm);
+      const nm = el2('span'); nm.textContent = g.o.name; nm.style.cssText = 'flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+      const add = el2('button', 'tl-ov-eye'); add.textContent = '＋'; add.title = 'Weiteres Fenster am Playhead';
+      add.addEventListener('click', () => apiAddClip(g.o.id, playheadT));
+      gl.append(ic, nm, add);
       gut.appendChild(gl);
       const lane = el2('div', 'tl-lane');
-      lane.appendChild(buildOverlayClip(o));
+      for (const c of g.clips) lane.appendChild(buildOverlayClip(c, g.o));
       lanes.appendChild(lane);
-    });
+    }
   }
 
   let suppressClick = false;
-  function buildOverlayClip(o) {
-    const start = o.start || 0;
-    const end = o.duration == null ? total : Math.min(total, start + o.duration);
-    const clip = el2('div', 'tl-ov-clip' + (o.enabled ? '' : ' disabled'));
+  function buildOverlayClip(c, o) {
+    const start = c.start || 0;
+    const end = c.duration == null ? total : Math.min(total, start + c.duration);
+    const clip = el2('div', 'tl-ov-clip' + (c.enabled ? '' : ' disabled'));
     clip.style.left = start * pxPerSec + 'px';
     clip.style.width = Math.max(10, (end - start) * pxPerSec) + 'px';
 
     const lh = el2('div', 'tl-ov-handle l'), rh = el2('div', 'tl-ov-handle r');
     const label = el2('span', 'tl-ov-label');
-    label.textContent = o.name + (o.duration == null ? ' · immer' : '');
+    label.textContent = o.name + (c.duration == null ? ' · immer' : '');
     const eye = el2('button', 'tl-ov-eye');
-    eye.textContent = o.enabled ? '👁' : '🚫'; eye.title = 'Ein-/ausblenden';
+    eye.textContent = c.enabled ? '👁' : '🚫'; eye.title = 'Ein-/ausblenden';
     eye.addEventListener('pointerdown', (e) => e.stopPropagation());
-    eye.addEventListener('click', (e) => { e.stopPropagation(); apiPatchOverlay(o.id, { enabled: !o.enabled }); });
-    clip.append(lh, label, eye, rh);
+    eye.addEventListener('click', (e) => { e.stopPropagation(); apiPatchClip(c.id, { enabled: !c.enabled }); });
+    const del = el2('button', 'tl-ov-eye');
+    del.textContent = '🗑'; del.title = 'Fenster entfernen';
+    del.addEventListener('pointerdown', (e) => e.stopPropagation());
+    del.addEventListener('click', (e) => { e.stopPropagation(); apiDeleteClip(c.id); });
+    clip.append(lh, label, eye, del, rh);
 
-    bindClipDrag(clip, o);
-    bindTrim(lh, o, 'l'); bindTrim(rh, o, 'r');
+    bindClipDrag(clip, c);
+    bindTrim(lh, c, 'l'); bindTrim(rh, c, 'r');
     clip.addEventListener('click', () => { if (!suppressClick) location.href = '/overlay?overlay=' + o.id; });
     return clip;
   }
 
   const timeAtX = (clientX) => (clientX - $('tl-tracks').getBoundingClientRect().left) / pxPerSec;
-  function bindClipDrag(clip, o) {
+  function bindClipDrag(clip, c) {
     clip.addEventListener('pointerdown', (e) => {
       if (e.target.classList.contains('tl-ov-handle')) return; // Trimmen separat
       e.stopPropagation();
       clip.setPointerCapture(e.pointerId);
-      const sx = e.clientX, orig = o.start || 0; let moved = false;
+      const sx = e.clientX, orig = c.start || 0; let moved = false;
       const move = (m) => {
         const dx = (m.clientX - sx) / pxPerSec;
         if (Math.abs(m.clientX - sx) > 3) moved = true;
-        const span = o.duration == null ? 0 : o.duration;
-        o.start = Math.max(0, Math.min(Math.max(0, total - span), orig + dx));
-        const end = o.duration == null ? total : Math.min(total, o.start + o.duration);
-        clip.style.left = o.start * pxPerSec + 'px';
-        clip.style.width = Math.max(10, (end - o.start) * pxPerSec) + 'px';
+        const span = c.duration == null ? 0 : c.duration;
+        c.start = Math.max(0, Math.min(Math.max(0, total - span), orig + dx));
+        const end = c.duration == null ? total : Math.min(total, c.start + c.duration);
+        clip.style.left = c.start * pxPerSec + 'px';
+        clip.style.width = Math.max(10, (end - c.start) * pxPerSec) + 'px';
       };
       const up = () => {
         clip.removeEventListener('pointermove', move); clip.removeEventListener('pointerup', up);
-        if (moved) { suppressClick = true; setTimeout(() => { suppressClick = false; }, 50); apiPatchOverlay(o.id, { start: o.start }); }
+        if (moved) { suppressClick = true; setTimeout(() => { suppressClick = false; }, 50); apiPatchClip(c.id, { start: c.start }); }
       };
       clip.addEventListener('pointermove', move); clip.addEventListener('pointerup', up);
     });
   }
-  function bindTrim(handle, o, side) {
+  function bindTrim(handle, c, side) {
     handle.addEventListener('pointerdown', (e) => {
       e.stopPropagation();
       handle.setPointerCapture(e.pointerId);
       const clip = handle.parentElement;
-      const end0 = o.duration == null ? total : (o.start || 0) + o.duration;
+      const end0 = c.duration == null ? total : (c.start || 0) + c.duration;
       const move = (m) => {
         const t = Math.max(0, Math.min(total, timeAtX(m.clientX)));
         if (side === 'r') {
-          o.duration = Math.max(0.5, t - (o.start || 0));
+          c.duration = Math.max(0.5, t - (c.start || 0));
         } else {
           const ns = Math.max(0, Math.min(end0 - 0.5, t));
-          o.duration = end0 - ns; o.start = ns;
+          c.duration = end0 - ns; c.start = ns;
         }
-        const s = o.start || 0, en = s + o.duration;
+        const s = c.start || 0, en = s + c.duration;
         clip.style.left = s * pxPerSec + 'px';
         clip.style.width = Math.max(10, (en - s) * pxPerSec) + 'px';
       };
       const up = () => {
         handle.removeEventListener('pointermove', move); handle.removeEventListener('pointerup', up);
         suppressClick = true; setTimeout(() => { suppressClick = false; }, 50);
-        apiPatchOverlay(o.id, { start: o.start || 0, duration: o.duration });
+        apiPatchClip(c.id, { start: c.start || 0, duration: c.duration });
       };
       handle.addEventListener('pointermove', move); handle.addEventListener('pointerup', up);
     });
@@ -464,10 +489,16 @@
   }
   $('tl-zoom').addEventListener('input', applyZoom);
   $('tl-fit').addEventListener('click', () => { $('tl-zoom').value = 100; applyZoom(); });
+  // Neues Overlay anlegen + Fenster (Clip) am Playhead, dann zum Editor.
   $('tl-add-overlay').addEventListener('click', async () => {
     const r = await fetch('/api/overlay', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
     const o = await r.json().catch(() => null);
-    if (o && o.id) location.href = '/overlay?overlay=' + o.id;
+    if (o && o.id) { try { await apiAddClip(o.id, playheadT); } catch (_) {} location.href = '/overlay?overlay=' + o.id; }
+  });
+  // Vorhandenes Overlay als Fenster am Playhead in die aktuelle Playlist einfügen.
+  $('tl-ov-addclip').addEventListener('click', () => {
+    const id = $('tl-ov-pick').value;
+    if (id) apiAddClip(id, playheadT);
   });
   window.addEventListener('resize', () => { scaleInlinePreview(); render(); });
 

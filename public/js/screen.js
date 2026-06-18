@@ -88,9 +88,9 @@
   function applyState(s) {
     if (!s) return;
     state = s;
-    renderOverlays(s.overlays || []);
-    if (offAirState) { els.overlays.classList.add('hidden'); clearTimer(); clearStage(); return; }
-    afterStateRebuild();
+    if (offAirState) { els.overlays.classList.add('hidden'); clearTimer(); clearStage(); renderOverlays(); return; }
+    afterStateRebuild();   // setzt topId (welche Playlist überträgt)
+    renderOverlays();      // Overlay-Layer aus den Clips dieser Playlist bauen
   }
 
   // ===== Overlays (mehrere Zeit-Clips über dem Content) ===================
@@ -106,12 +106,21 @@
     for (const fn of fns) { try { fn(patch); } catch (_) {} }
   }
 
-  function renderOverlays(list) {
+  // Overlays werden aus den Clips der aktuell übertragenen Playlist (topId) gebaut.
+  // Ein Layer je Clip; mehrere Clips können dasselbe Overlay referenzieren (mehrere Fenster).
+  function currentClips() {
+    const pl = state && state.playlists && state.playlists.byId[topId];
+    return (pl && pl.overlayClips) || [];
+  }
+  const overlayById = (id) => (state && state.overlays || []).find((o) => o.id === id);
+  function renderOverlays() {
     dynTimers.forEach(clearInterval); dynTimers = [];
     els.overlays.innerHTML = '';
     overlayLayers = [];
     elById = {};
-    for (const o of list) {
+    for (const clip of currentClips()) {
+      const o = overlayById(clip.overlayId);
+      if (!o) continue;
       const layer = document.createElement('div');
       layer.className = 'ov-layer hidden';
       if (o.blur > 0) {
@@ -122,7 +131,7 @@
       }
       for (const e of o.elements) layer.appendChild(buildElement(e));
       els.overlays.appendChild(layer);
-      overlayLayers.push({ overlay: o, layerEl: layer });
+      overlayLayers.push({ clip, overlay: o, layerEl: layer });
     }
     updateOverlayVisibility();
   }
@@ -227,12 +236,12 @@
     dynTimers.push(setInterval(load, Math.max(2, s.refreshSec || 60) * 1000));
   }
 
-  // Aktive Overlays nach Programmzeit ein-/ausblenden.
+  // Aktive Overlays nach Programmzeit ein-/ausblenden (Fenster = Clip start/duration).
   function updateOverlayVisibility() {
     const t = programTime();
-    for (const { overlay, layerEl } of overlayLayers) {
-      const end = overlay.duration == null ? Infinity : overlay.start + overlay.duration;
-      const active = overlay.enabled && t >= overlay.start && t < end;
+    for (const { clip, layerEl } of overlayLayers) {
+      const end = clip.duration == null ? Infinity : clip.start + clip.duration;
+      const active = clip.enabled && t >= clip.start && t < end;
       layerEl.classList.toggle('hidden', !active);
     }
   }
@@ -530,10 +539,12 @@
     const pl = state.playlists.byId[topId];
     const after = pl ? pl.after : 'loop';
     if (after === 'stop') return; // letztes Bild bleibt stehen
+    const prevTop = topId;
     if (after === 'next' && pl.nextId && state.playlists.byId[pl.nextId]) topId = pl.nextId;
     rebuild();
     idx = 0;
     progBase = 0; // Programm beginnt von vorn (Loop/Next)
+    if (topId !== prevTop) renderOverlays(); // andere Playlist -> andere Overlay-Clips
     seq.length ? showCurrent() : clearStage();
   }
 

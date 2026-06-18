@@ -66,6 +66,8 @@ a.tl-title:hover { text-decoration: underline; color: var(--accent); }
 .tl-zoom input[type="range"] { width: 160px; accent-color: var(--accent); cursor: pointer; }
 .tl-zoom-end { font-size: 11px; color: var(--muted); letter-spacing: 0.02em; }
 .tl-zoom .tl-tbtn { padding: 5px 10px; font-size: 13px; }
+.tl-ov-add { display: inline-flex; gap: 6px; align-items: center; }
+.tl-ov-add select { background: var(--panel-2); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 6px 8px; font-size: 13px; max-width: 160px; }
 
 /* Gutter (Spurnamen) links fix, Spuren rechts horizontal scrollbar. */
 .tl-grid { display: flex; align-items: stretch; }

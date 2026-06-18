@@ -80,16 +80,13 @@
     if (!overlays().length) { list.innerHTML = '<div class="ed-empty-hint">Noch keine Overlays.</div>'; return; }
     overlays().forEach((o) => {
       const row = document.createElement('div');
-      row.className = 'ed-item' + (o.id === selOvId ? ' sel' : '') + (o.enabled ? '' : ' disabled');
-      const chk = document.createElement('input');
-      chk.type = 'checkbox'; chk.checked = o.enabled; chk.title = 'Ein-/ausblenden';
-      chk.addEventListener('click', (e) => e.stopPropagation());
-      chk.addEventListener('change', () => api('PATCH', `/api/overlay/${o.id}`, { enabled: chk.checked }));
+      row.className = 'ed-item' + (o.id === selOvId ? ' sel' : '');
+      const ic = document.createElement('span'); ic.className = 'ic'; ic.textContent = '✦';
       const name = document.createElement('span');
       name.className = 'ed-name'; name.textContent = o.name;
       const tag = document.createElement('span');
       tag.className = 'ed-tag'; tag.textContent = `${o.elements.length} El.`;
-      row.append(chk, name, tag);
+      row.append(ic, name, tag);
       row.addEventListener('click', () => { selOvId = o.id; selIds = []; render(); });
       list.appendChild(row);
     });
@@ -105,13 +102,9 @@
     box.innerHTML = '';
     if (!o) return;
     box.appendChild(field('Name', textInput(o.name, (v) => api('PATCH', `/api/overlay/${o.id}`, { name: v }))));
-    const grid = el('div', 'ed-grid2');
-    grid.appendChild(field('Start (s)', numInput(o.start, 0, 100000, 0.5, (v) => api('PATCH', `/api/overlay/${o.id}`, { start: v }))));
-    const dur = numInput(o.duration == null ? '' : o.duration, 0, 100000, 0.5, (v) => api('PATCH', `/api/overlay/${o.id}`, { duration: v > 0 ? v : null }));
-    dur.placeholder = 'immer';
-    grid.appendChild(field('Dauer (s) – leer = immer', dur));
-    box.appendChild(grid);
     box.appendChild(field('Hintergrund-Blur (px)', numInput(o.blur, 0, 60, 1, (v) => api('PATCH', `/api/overlay/${o.id}`, { blur: v }))));
+    const hint = el('div', 'ed-empty-hint'); hint.textContent = 'Anzeige-Zeitfenster werden in der Programm-Timeline pro Playlist gesetzt.';
+    box.appendChild(hint);
     const actions = el('div', 'ed-row'); actions.style.marginTop = '10px';
     actions.appendChild(btn('In den Vordergrund', 'tiny', () => moveZ(o.id, +1)));
     actions.appendChild(btn('Nach hinten', 'tiny ghost', () => moveZ(o.id, -1)));

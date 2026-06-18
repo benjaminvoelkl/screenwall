@@ -149,11 +149,12 @@ function normalizePlaylists(p) {
       name: typeof pl.name === 'string' ? pl.name : 'Playlist',
       after: ['next', 'loop', 'stop'].includes(pl.after) ? pl.after : 'loop',
       nextId: typeof pl.nextId === 'string' ? pl.nextId : null,
-      items
+      items,
+      overlayClips: Array.isArray(pl.overlayClips) ? pl.overlayClips.map(normalizeOverlayClip).filter((c) => c.overlayId) : []
     };
   }
   if (Object.keys(byId).length === 0) {
-    byId['pl-default'] = { id: 'pl-default', name: 'Playlist 1', after: 'loop', nextId: null, items: [] };
+    byId['pl-default'] = { id: 'pl-default', name: 'Playlist 1', after: 'loop', nextId: null, items: [], overlayClips: [] };
   }
   // Kaputte Referenzen säubern.
   for (const pl of Object.values(byId)) {
@@ -252,19 +253,30 @@ function normalizeLibEntry(en) {
 }
 function normalizeLibrary(arr) { return Array.isArray(arr) ? arr.map(normalizeLibEntry) : []; }
 
+// Overlay = wiederverwendbarer Inhalt (kein eigenes Scheduling mehr). Die Anzeige-
+// Zeitfenster liegen als "overlayClips" pro Playlist (mehrere je Overlay möglich).
 function normalizeOverlay(o) {
   o = (o && typeof o === 'object') ? o : {};
   return {
     id: typeof o.id === 'string' ? o.id : newId(),
     name: typeof o.name === 'string' ? o.name : 'Overlay',
-    enabled: o.enabled !== false,
-    start: (typeof o.start === 'number' && o.start >= 0) ? o.start : 0,
-    duration: (typeof o.duration === 'number' && o.duration > 0) ? o.duration : null, // null = ganzes Programm
     blur: (typeof o.blur === 'number' && o.blur >= 0) ? o.blur : 0,
     elements: Array.isArray(o.elements) ? o.elements.map(normalizeElement) : []
   };
 }
 function normalizeOverlays(arr) { return Array.isArray(arr) ? arr.map(normalizeOverlay) : []; }
+
+// Ein Overlay-Clip (Anzeigefenster eines Overlays in einer Playlist).
+function normalizeOverlayClip(c) {
+  c = (c && typeof c === 'object') ? c : {};
+  return {
+    id: typeof c.id === 'string' ? c.id : newId(),
+    overlayId: typeof c.overlayId === 'string' ? c.overlayId : '',
+    enabled: c.enabled !== false,
+    start: (typeof c.start === 'number' && c.start >= 0) ? c.start : 0,
+    duration: (typeof c.duration === 'number' && c.duration > 0) ? c.duration : null // null = bis Programmende
+  };
+}
 
 // Altes Willkommens-Overlay (welcome.*) in ein Overlay mit Elementen überführen.
 function overlayFromWelcome(w) {
@@ -359,11 +371,34 @@ function prepareState(loaded) {
     playlists = migrated ? normalizePlaylists(migrated) : structuredClone(DEFAULT_STATE.playlists);
   }
   let overlays;
-  if (Array.isArray(loaded.overlays)) overlays = normalizeOverlays(loaded.overlays);
-  else if (loaded.welcome) overlays = [overlayFromWelcome(loaded.welcome)]; // Migration aus altem welcome
-  else overlays = [];
+  const rawOverlays = Array.isArray(loaded.overlays) ? loaded.overlays : [];
+  if (rawOverlays.length) overlays = normalizeOverlays(rawOverlays);
+  else if (loaded.welcome) { // Migration aus altem welcome
+    const wov = overlayFromWelcome(loaded.welcome);
+    overlays = [wov];
+    const root = playlists.byId[playlists.rootId];
+    if (root) root.overlayClips.push(normalizeOverlayClip({ overlayId: wov.id, enabled: loaded.welcome.visible !== false, start: 0, duration: null }));
+  } else overlays = [];
+  // Migration alt->neu: Overlays mit eigenem Scheduling (start/duration/enabled) bekommen
+  // je einen Clip an der Root-Playlist (idempotent: nur wenn noch kein Clip existiert).
+  migrateOverlayWindows(playlists, rawOverlays);
   const library = normalizeLibrary(loaded.library);
   return { playlists, overlays, library };
+}
+
+// Bestehende (alt-modellierte) Overlay-Zeitfenster in Playlist-Clips überführen.
+function migrateOverlayWindows(playlists, rawOverlays) {
+  const root = playlists.byId[playlists.rootId];
+  if (!root) return;
+  const clipped = new Set();
+  for (const pl of Object.values(playlists.byId)) for (const c of (pl.overlayClips || [])) clipped.add(c.overlayId);
+  for (const ro of rawOverlays) {
+    if (!ro || typeof ro !== 'object' || typeof ro.id !== 'string') continue;
+    const hasSched = ('start' in ro) || ('duration' in ro) || ('enabled' in ro);
+    if (!hasSched || clipped.has(ro.id)) continue;
+    root.overlayClips.push(normalizeOverlayClip({ overlayId: ro.id, enabled: ro.enabled, start: ro.start, duration: ro.duration }));
+    clipped.add(ro.id);
+  }
 }
 
 function loadState() {
@@ -631,6 +666,17 @@ function findElement(eid, root = state) {
   }
   return null;
 }
+// Overlays einer Playlist (aufgelöst aus ihren Clips), je Overlay mit Zeitfenstern.
+function overlaysOfPlaylist(pl, root = state) {
+  const byOv = new Map();
+  for (const c of (pl.overlayClips || [])) {
+    const ov = (root.overlays || []).find((o) => o.id === c.overlayId);
+    if (!ov) continue;
+    if (!byOv.has(ov.id)) byOv.set(ov.id, { overlayId: ov.id, name: ov.name, windows: [] });
+    byOv.get(ov.id).windows.push({ clipId: c.id, start: c.start, end: c.duration == null ? null : c.start + c.duration, enabled: c.enabled });
+  }
+  return [...byOv.values()];
+}
 
 // ---------------------------------------------------------------------------
 // HTTP / Express
@@ -697,7 +743,7 @@ app.get('/api/playlists', (req, res) => {
   const pls = state.playlists;
   const list = Object.values(pls.byId).map((pl) => {
     const { total } = programEntries(pl.id);
-    return { id: pl.id, name: pl.name, active: pl.id === pls.rootId, itemCount: pl.items.length, totalSec: Math.round(total), after: pl.after, nextId: pl.nextId };
+    return { id: pl.id, name: pl.name, active: pl.id === pls.rootId, itemCount: pl.items.length, totalSec: Math.round(total), after: pl.after, nextId: pl.nextId, overlays: overlaysOfPlaylist(pl) };
   });
   res.json({ rootId: pls.rootId, playlists: list });
 });
@@ -709,7 +755,8 @@ app.get('/api/playlists/:id', (req, res) => {
   const { entries, total } = programEntries(pl.id);
   res.json({
     id: pl.id, name: pl.name, active: pl.id === state.playlists.rootId, after: pl.after, nextId: pl.nextId, totalSec: Math.round(total),
-    items: entries.map((e) => ({ itemId: e.itemId, type: e.content.type, name: e.content.name || e.content.videoId || e.content.url || e.content.type, start: Math.round(e.start), dur: Math.round(e.dur) }))
+    items: entries.map((e) => ({ itemId: e.itemId, type: e.content.type, name: e.content.name || e.content.videoId || e.content.url || e.content.type, start: Math.round(e.start), dur: Math.round(e.dur) })),
+    overlays: overlaysOfPlaylist(pl)
   });
 });
 
@@ -767,9 +814,9 @@ app.get('/api/status', (req, res) => {
   const itemDuration = np.duration || (cur ? cur.dur : 0);
   const itemElapsed = np.time || 0;
   const name = cur ? (cur.content.name || cur.content.videoId || cur.content.url || cur.content.type) : null;
-  const overlaysActive = (live.overlays || [])
-    .filter((o) => o.enabled !== false && progTime >= (o.start || 0) && (o.duration == null || progTime < (o.start || 0) + o.duration))
-    .map((o) => ({ overlayId: o.id, name: o.name }));
+  const overlaysActive = ((root && root.overlayClips) || [])
+    .filter((c) => c.enabled !== false && progTime >= (c.start || 0) && (c.duration == null || progTime < (c.start || 0) + c.duration))
+    .map((c) => { const ov = (live.overlays || []).find((o) => o.id === c.overlayId); return { clipId: c.id, overlayId: c.overlayId, name: ov ? ov.name : null }; });
   res.json({
     offair: offAir,
     playlist: root ? { id: root.id, name: root.name } : null,
@@ -786,7 +833,7 @@ app.get('/api/status', (req, res) => {
 app.get('/api/overlays', (req, res) => {
   res.json({
     overlays: (state.overlays || []).map((o) => ({
-      id: o.id, name: o.name, enabled: o.enabled, start: o.start, duration: o.duration,
+      id: o.id, name: o.name, blur: o.blur,
       elements: (o.elements || []).map((e) => ({ id: e.id, type: e.type, text: e.text, url: e.url, filename: e.filename, data: e.data }))
     }))
   });
@@ -840,7 +887,8 @@ app.post('/api/playlist/:id/clone', (req, res) => {
   const items = pl.items.map((it) => it.kind === 'playlist'
     ? { id: newId(), kind: 'playlist', refId: it.refId }
     : { id: newId(), kind: 'content', content: normalizeContent(structuredClone(it.content)) });
-  const copy = { id: newId(), name: `${pl.name} (Kopie)`, after: pl.after, nextId: pl.nextId, items };
+  const overlayClips = (pl.overlayClips || []).map((c) => normalizeOverlayClip({ ...c, id: newId() }));
+  const copy = { id: newId(), name: `${pl.name} (Kopie)`, after: pl.after, nextId: pl.nextId, items, overlayClips };
   state.playlists.byId[copy.id] = copy;
   saveState();
   broadcast();
@@ -1161,22 +1209,19 @@ app.post('/api/offair', (req, res) => {
 // ---------------------------------------------------------------------------
 app.post('/api/overlay', (req, res) => {
   const name = (req.body?.name || '').trim() || `Overlay ${state.overlays.length + 1}`;
-  const o = normalizeOverlay({ name, enabled: true, start: 0, duration: null, elements: [] });
+  const o = normalizeOverlay({ name, elements: [] });
   state.overlays.push(o);
   saveState();
   broadcast();
   res.json(o);
 });
 
-// Overlay-Felder ändern: name/enabled/start/duration/blur.
+// Overlay-Inhalt ändern: name/blur (Scheduling liegt an den Playlist-Clips).
 app.patch('/api/overlay/:id', (req, res) => {
   const o = getOverlay(req.params.id);
   if (!o) return res.status(404).json({ error: 'Overlay nicht gefunden' });
   const p = req.body || {};
   if (typeof p.name === 'string' && p.name.trim()) o.name = p.name.trim();
-  if (typeof p.enabled === 'boolean') o.enabled = p.enabled;
-  if (typeof p.start === 'number' && p.start >= 0) o.start = p.start;
-  if ('duration' in p) o.duration = (typeof p.duration === 'number' && p.duration > 0) ? p.duration : null;
   if (typeof p.blur === 'number' && p.blur >= 0) o.blur = p.blur;
   saveState();
   broadcast();
@@ -1187,8 +1232,49 @@ app.delete('/api/overlay/:id', (req, res) => {
   const i = state.overlays.findIndex((o) => o.id === req.params.id);
   if (i === -1) return res.status(404).json({ error: 'Overlay nicht gefunden' });
   const [removed] = state.overlays.splice(i, 1);
+  // Verwaiste Clips dieses Overlays aus allen Playlists entfernen.
+  for (const pl of Object.values(state.playlists.byId)) {
+    if (pl.overlayClips) pl.overlayClips = pl.overlayClips.filter((c) => c.overlayId !== removed.id);
+  }
   saveState();
   for (const e of removed.elements) if (e.type === 'image' && e.filename) cleanupFile(e.filename);
+  broadcast();
+  res.json({ ok: true });
+});
+
+// --- Overlay-Clips (Anzeigefenster eines Overlays in einer Playlist) --------
+app.post('/api/playlist/:id/overlay-clips', (req, res) => {
+  const pl = getPlaylist(req.params.id);
+  if (!pl) return res.status(404).json({ error: 'Playlist nicht gefunden' });
+  const b = req.body || {};
+  if (!getOverlay(b.overlayId)) return res.status(400).json({ error: 'Overlay nicht gefunden' });
+  const clip = normalizeOverlayClip({ overlayId: b.overlayId, start: b.start, duration: b.duration, enabled: b.enabled });
+  pl.overlayClips = pl.overlayClips || [];
+  pl.overlayClips.push(clip);
+  saveState();
+  broadcast();
+  res.json(clip);
+});
+app.patch('/api/playlist/:id/overlay-clips/:clipId', (req, res) => {
+  const pl = getPlaylist(req.params.id);
+  if (!pl) return res.status(404).json({ error: 'Playlist nicht gefunden' });
+  const clip = (pl.overlayClips || []).find((c) => c.id === req.params.clipId);
+  if (!clip) return res.status(404).json({ error: 'Clip nicht gefunden' });
+  const p = req.body || {};
+  if (typeof p.start === 'number' && p.start >= 0) clip.start = p.start;
+  if ('duration' in p) clip.duration = (typeof p.duration === 'number' && p.duration > 0) ? p.duration : null;
+  if (typeof p.enabled === 'boolean') clip.enabled = p.enabled;
+  saveState();
+  broadcast();
+  res.json(clip);
+});
+app.delete('/api/playlist/:id/overlay-clips/:clipId', (req, res) => {
+  const pl = getPlaylist(req.params.id);
+  if (!pl) return res.status(404).json({ error: 'Playlist nicht gefunden' });
+  const i = (pl.overlayClips || []).findIndex((c) => c.id === req.params.clipId);
+  if (i === -1) return res.status(404).json({ error: 'Clip nicht gefunden' });
+  pl.overlayClips.splice(i, 1);
+  saveState();
   broadcast();
   res.json({ ok: true });
 });
