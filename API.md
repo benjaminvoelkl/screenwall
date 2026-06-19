@@ -46,7 +46,18 @@ ermittle die **`videoId`** (der Teil nach `v=` in `youtube.com/watch?v=…`) und
 | `video` | `filename`, `videoMode` (`end`\|`duration`), `durationSec` (bei duration), `muted` |
 | `youtube` | `videoId`, `videoMode` (`end`\|`duration`), `durationSec`, `muted` |
 | `webpage` | `url`, `durationSec` |
+| `screenshare` | `withAudio` (bool, optional); `sessionId` wird automatisch vergeben |
 `name` ist überall optional. Bilder/Videos müssen vorher hochgeladen sein (`/api/upload`).
+
+**Bildschirmfreigabe (`screenshare`):** Überträgt einen entfernten Bildschirm per
+WebRTC auf die Wand. Solange der Block live ist und niemand teilt, zeigt die Wand
+einen Beitritts-Link **`https://<LAN-IP>:<HTTPS_PORT>/share?s=<sessionId>`** samt
+QR-Code. Ein entfernter Browser öffnet den Link, klickt „Bildschirm teilen“ – das
+Bild erscheint dann auf der Wand. `getDisplayMedia()` verlangt HTTPS, daher läuft
+`/share` über den selbst-signierten HTTPS-Listener (Port `HTTPS_PORT`, Default
+3443; einmalige Zertifikatswarnung). Der Block schaltet **nicht** automatisch
+weiter (hält, solange präsentiert wird). Einmal teilen genügt: Der Capture-Stream
+bleibt aktiv, auch wenn die Wand zwischendurch anderen Inhalt zeigt.
 
 ---
 
@@ -244,12 +255,12 @@ für OpenAI `input_schema` → `parameters` umbenennen und in `{ "type":"functio
   },
   {
     "name": "create_playlist",
-    "description": "Playlist anlegen und optional mit Inhalten befüllen. POST /api/playlists. description = Kontext für spätere LLM-Auswahl. items[] sind content-Objekte (type: color|image|video|youtube|webpage).",
+    "description": "Playlist anlegen und optional mit Inhalten befüllen. POST /api/playlists. description = Kontext für spätere LLM-Auswahl. items[] sind content-Objekte (type: color|image|video|youtube|webpage|screenshare).",
     "input_schema": { "type": "object", "properties": {
       "name": { "type": "string" }, "description": { "type": "string" },
       "items": { "type": "array", "items": { "type": "object",
         "properties": {
-          "type": { "type": "string", "enum": ["color","image","video","youtube","webpage"] },
+          "type": { "type": "string", "enum": ["color","image","video","youtube","webpage","screenshare"] },
           "color": { "type": "string" }, "filename": { "type": "string" }, "videoId": { "type": "string" },
           "url": { "type": "string" }, "durationSec": { "type": "number" },
           "videoMode": { "type": "string", "enum": ["end","duration"] }, "name": { "type": "string" }

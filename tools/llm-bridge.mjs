@@ -22,7 +22,7 @@ const tools = [
   { name: 'list_playlists', description: 'Alle Playlists mit Namen, Gesamtdauer, Aktiv-Flag und Overlay-Fenstern auflisten.', input_schema: { type: 'object', properties: {} } },
   { name: 'get_playlist', description: 'Eine Playlist inkl. ausgeflachter Inhalte holen.', input_schema: { type: 'object', properties: { playlistId: { type: 'string' } }, required: ['playlistId'] } },
   { name: 'play', description: 'Eine Playlist sofort übertragen, optional ab Sekunde (time) ODER Prozent (percent, 0-100, hat Vorrang).', input_schema: { type: 'object', properties: { playlistId: { type: 'string' }, time: { type: 'number' }, percent: { type: 'number' } }, required: ['playlistId'] } },
-  { name: 'create_playlist', description: 'Playlist anlegen und optional mit Inhalten befüllen. description = Kontext für spätere Auswahl. items[] = content-Objekte (type: color|image|video|youtube|webpage).', input_schema: { type: 'object', properties: { name: { type: 'string' }, description: { type: 'string' }, items: { type: 'array', items: { type: 'object' } } }, required: ['name'] } },
+  { name: 'create_playlist', description: 'Playlist anlegen und optional mit Inhalten befüllen. description = Kontext für spätere Auswahl. items[] = content-Objekte (type: color|image|video|youtube|webpage|screenshare). screenshare = entfernten Bildschirm einblenden (optional withAudio); die Wand zeigt dann Link+QR zum Teilen.', input_schema: { type: 'object', properties: { name: { type: 'string' }, description: { type: 'string' }, items: { type: 'array', items: { type: 'object' } } }, required: ['name'] } },
   { name: 'set_playlist_meta', description: 'Name und/oder Beschreibung (Kontext für Auswahl) einer Playlist setzen.', input_schema: { type: 'object', properties: { playlistId: { type: 'string' }, name: { type: 'string' }, description: { type: 'string' } }, required: ['playlistId'] } },
   { name: 'set_element', description: 'Inhalt eines Overlay-Elements live setzen. eid via list_overlays. value passt sich dem Typ an (text/url/data).', input_schema: { type: 'object', properties: { eid: { type: 'string' }, value: { type: 'string' }, text: { type: 'string' }, url: { type: 'string' }, data: { type: 'string' }, fill: { type: 'string' } }, required: ['eid'] } },
   { name: 'list_overlays', description: 'Overlays mit Element-IDs auflisten (für set_element).', input_schema: { type: 'object', properties: {} } },
@@ -93,6 +93,10 @@ und benutze { "type":"youtube", "videoId":"…", "videoMode":"end", "muted":fals
 Playlist finden: Playlists haben name UND description (freier Kontext). Matche die
 Nutzeranfrage (z. B. "die mit PV-Anlagen") gegen beide; reicht das nicht, hole get_playlist
 und prüfe die Item-Namen. Nie raten/IDs erfinden.
+
+Bildschirm teilen: { "type":"screenshare", "withAudio":false } als Content einfügen. Die Wand
+zeigt dann automatisch einen Teil-Link + QR-Code; ein entfernter Browser überträgt damit seinen
+Bildschirm. Eine Quelle/URL musst du NICHT angeben.
 
 Element-Positionen sind Bruchteile 0..1 (x,y,w,h). Sende bei play nicht time und percent
 gleichzeitig. Antworte knapp auf Deutsch und bestätige, was du getan hast (oder was schiefging).`;

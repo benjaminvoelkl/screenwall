@@ -21,18 +21,24 @@ import express from 'express';
 import { WebSocketServer } from 'ws';
 import multer from 'multer';
 import { createServer } from 'http';
+import { createServer as createHttpsServer } from 'https';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join, extname } from 'path';
 import { randomUUID } from 'crypto';
 import { networkInterfaces } from 'os';
-import { execFile } from 'child_process';
+import { execFile, execFileSync } from 'child_process';
 import QRCode from 'qrcode';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
+// Zweiter Listener über HTTPS: getDisplayMedia() (Bildschirmfreigabe) verlangt im
+// Browser einen "secure context" – über http://<LAN-IP> ist das nicht gegeben.
+// Die Share-Seite (/share) wird daher über HTTPS ausgeliefert.
+const HTTPS_PORT = process.env.HTTPS_PORT || 3443;
 // An 0.0.0.0 binden, damit der Server im gesamten LAN erreichbar ist (nicht nur localhost).
 const HOST = '0.0.0.0';
+const CERT_DIR = join(__dirname, 'certs');
 
 const STATE_FILE = join(__dirname, 'state.json'); // Entwurf (von der Steuerung bearbeitet)
 const LIVE_FILE = join(__dirname, 'live.json'); // Veröffentlichter Zustand (Wand/​/screen)
@@ -45,6 +51,29 @@ const AUDIO_SINK = process.env.AUDIO_SINK || '@DEFAULT_AUDIO_SINK@';
 
 if (!existsSync(UPLOAD_DIR)) mkdirSync(UPLOAD_DIR, { recursive: true });
 if (!existsSync(THUMB_DIR)) mkdirSync(THUMB_DIR, { recursive: true });
+
+// Selbst-signiertes Zertifikat für den HTTPS-Listener. Wird beim ersten Start
+// per openssl erzeugt und in certs/ gecacht. Der Browser zeigt einmalig eine
+// Warnung ("nicht privat"), die im LAN bewusst akzeptiert wird.
+function loadOrCreateCert() {
+  const keyFile = join(CERT_DIR, 'key.pem');
+  const certFile = join(CERT_DIR, 'cert.pem');
+  if (existsSync(keyFile) && existsSync(certFile)) {
+    return { key: readFileSync(keyFile), cert: readFileSync(certFile) };
+  }
+  if (!existsSync(CERT_DIR)) mkdirSync(CERT_DIR, { recursive: true });
+  try {
+    execFileSync('openssl', [
+      'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
+      '-keyout', keyFile, '-out', certFile,
+      '-days', '3650', '-subj', '/CN=screenwall'
+    ], { stdio: 'ignore' });
+    return { key: readFileSync(keyFile), cert: readFileSync(certFile) };
+  } catch (err) {
+    console.warn('  HTTPS deaktiviert – Zertifikat konnte nicht erzeugt werden (openssl?):', err.message);
+    return null;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Zustands-Modell
@@ -88,6 +117,13 @@ function normalizeContent(c) {
     if (type === 'webpage') {
       out.embeddable = typeof c.embeddable === 'boolean' ? c.embeddable : null;
       out.reason = typeof c.reason === 'string' ? c.reason : '';
+    }
+    if (type === 'screenshare') {
+      // Stabile Session-ID: verbindet die Wand (Empfänger) mit dem teilenden
+      // Browser. Überlebt golive (structuredClone), bleibt also über den Block
+      // hinweg gleich. withAudio = System-/Tab-Ton mitübertragen.
+      out.sessionId = typeof c.sessionId === 'string' && c.sessionId ? c.sessionId : newId();
+      out.withAudio = !!c.withAudio;
     }
   }
   // Anzeigedauer (für color/image/webpage/screenshare sowie video/youtube bei
@@ -720,6 +756,10 @@ function overlaysOfPlaylist(pl, root = state) {
 // ---------------------------------------------------------------------------
 const app = express();
 const server = createServer(app);
+// Zweiter Listener über HTTPS (für /share + WSS-Signaling). Optional: fehlt
+// openssl, läuft alles weiter, nur die Bildschirmfreigabe ist dann nicht nutzbar.
+const tls = loadOrCreateCert();
+const httpsServer = tls ? createHttpsServer(tls, app) : null;
 
 app.use(express.json({ limit: '2mb' }));
 app.use('/uploads', express.static(UPLOAD_DIR));
@@ -753,6 +793,11 @@ app.get('/settings', (req, res) => res.redirect('/programm'));
 app.get('/overlay', (req, res) => {
   res.set('Cache-Control', 'no-cache');
   res.sendFile(join(PUBLIC_DIR, 'overlay.html'));
+});
+// Bildschirm-Teilen-Seite (für entfernte Browser; sollte über HTTPS geladen sein).
+app.get('/share', (req, res) => {
+  res.set('Cache-Control', 'no-cache');
+  res.sendFile(join(PUBLIC_DIR, 'share.html'));
 });
 
 // Aktuellen Zustand holen. `?view=live` liefert den veröffentlichten Zustand.
@@ -1483,6 +1528,12 @@ app.post('/api/overlay/:id/element/from-library/:libId', (req, res) => {
 });
 
 // --- QR-Code als SVG (offline via qrcode-Paket) -----------------------------
+// Laufzeit-Konfiguration für die Clients (die Wand ist über HTTP geladen und
+// muss den HTTPS-Port für die Share-URL kennen).
+app.get('/api/config', (req, res) => {
+  res.json({ httpsPort: httpsServer ? Number(HTTPS_PORT) : null });
+});
+
 app.get('/api/qr', async (req, res) => {
   const data = (req.query.data || '').toString();
   if (!data) return res.status(400).send('data fehlt');
@@ -1538,7 +1589,14 @@ app.get('/api/fetch', async (req, res) => {
 // ---------------------------------------------------------------------------
 // WebSocket – Live-Broadcast des Zustands
 // ---------------------------------------------------------------------------
-const wss = new WebSocketServer({ server });
+// noServer: ein einziger WebSocket-Server bedient beide Transports (HTTP + HTTPS),
+// damit das Signaling zwischen Wand (ws, HTTP) und Publisher (wss, HTTPS) durchläuft.
+const wss = new WebSocketServer({ noServer: true });
+const handleUpgrade = (req, socket, head) => {
+  wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
+};
+server.on('upgrade', handleUpgrade);
+if (httpsServer) httpsServer.on('upgrade', handleUpgrade);
 
 function broadcast() {
   const draftMsg = JSON.stringify({ type: 'state', state, dirty: isDirty(), offair: offAir });
@@ -1565,23 +1623,95 @@ function sendToScreens(msg) {
 
 let liveNowPlaying = null; // Was läuft gerade auf der echten Wand?
 
+// ---- WebRTC-Signaling (Bildschirmfreigabe) --------------------------------
+// Der Server ist reiner Relay: Er hält pro Screenshare-Session die beteiligten
+// Clients (Publisher = teilender Browser, Viewer = Wand) und reicht
+// join/offer/answer/ice/bye gezielt (msg.to == client.id) bzw. an die Session
+// weiter. Die eigentliche P2P-Verbindung läuft direkt zwischen den Browsern.
+const rtcSessions = new Map(); // sessionId -> Set<ws>
+
+// Socket aus einer Session austragen (ohne weitere Nachricht). Leere Sessions
+// werden entfernt.
+function rtcDetach(ws, sid) {
+  if (!sid) return;
+  const peers = rtcSessions.get(sid);
+  if (peers) { peers.delete(ws); if (peers.size === 0) rtcSessions.delete(sid); }
+  if (ws.rtcSession === sid) ws.rtcSession = null;
+}
+
+// Verbindungsabbruch: verbleibende Peers informieren und austragen.
+function rtcLeave(ws) {
+  const sid = ws.rtcSession;
+  if (!sid) return;
+  const peers = rtcSessions.get(sid);
+  if (peers) {
+    const bye = JSON.stringify({ type: 'rtc', kind: 'bye', from: ws.id });
+    for (const peer of peers) if (peer !== ws && peer.readyState === peer.OPEN) peer.send(bye);
+  }
+  rtcDetach(ws, sid);
+}
+
+function handleRtc(ws, msg) {
+  const sid = typeof msg.session === 'string' ? msg.session : ws.rtcSession;
+  if (msg.kind === 'join') {
+    if (!sid) return;
+    // Falls vorher in einer anderen Session: dort sauber austragen.
+    if (ws.rtcSession && ws.rtcSession !== sid) rtcDetach(ws, ws.rtcSession);
+    ws.rtcSession = sid;
+    ws.peerRole = msg.peerRole === 'publisher' ? 'publisher' : 'viewer';
+    let peers = rtcSessions.get(sid);
+    if (!peers) { peers = new Set(); rtcSessions.set(sid, peers); }
+    // Dem Beitretenden die bereits anwesenden Peers melden ...
+    const existing = [...peers].map((p) => ({ id: p.id, peerRole: p.peerRole }));
+    peers.add(ws);
+    if (ws.readyState === ws.OPEN) {
+      ws.send(JSON.stringify({ type: 'rtc', kind: 'peers', peers: existing }));
+    }
+    // ... und die anderen über den Neuzugang informieren.
+    const hello = JSON.stringify({ type: 'rtc', kind: 'join', from: ws.id, peerRole: ws.peerRole });
+    for (const peer of peers) if (peer !== ws && peer.readyState === peer.OPEN) peer.send(hello);
+    return;
+  }
+  // Gezielte Nachrichten (offer/answer/ice/bye) an genau einen Peer der Session.
+  if (!sid) return;
+  const peers = rtcSessions.get(sid);
+  if (peers) {
+    const out = JSON.stringify({ ...msg, from: ws.id });
+    for (const peer of peers) {
+      if (peer === ws) continue;
+      if (msg.to && peer.id !== msg.to) continue;
+      if (peer.readyState === peer.OPEN) peer.send(out);
+    }
+  }
+  // Ein bye ohne Ziel bedeutet "ich verlasse diese Session" → austragen.
+  if (msg.kind === 'bye' && !msg.to) rtcDetach(ws, sid);
+}
+
 wss.on('connection', (ws, req) => {
   let role = '';
   try { role = new URL(req.url, 'http://x').searchParams.get('role') || ''; } catch (_) {}
+  ws.id = newId();
   ws.role = role;
-  ws.isWall = role !== 'preview' && role !== 'control';
+  ws.isWall = role !== 'preview' && role !== 'control' && role !== 'share';
 
-  ws.send(ws.isWall
-    ? JSON.stringify({ type: 'state', state: live, offair: offAir })
-    : JSON.stringify({ type: 'state', state, dirty: isDirty(), offair: offAir }));
+  // Der teilende Browser (role=share) bekommt keinen Anzeige-Zustand, nur Signaling.
+  if (ws.role !== 'share') {
+    ws.send(ws.isWall
+      ? JSON.stringify({ type: 'state', state: live, offair: offAir })
+      : JSON.stringify({ type: 'state', state, dirty: isDirty(), offair: offAir }));
+  }
   if ((ws.role === 'control' || ws.role === 'monitor') && liveNowPlaying) {
     ws.send(JSON.stringify({ type: 'cmd', cmd: 'nowplaying', ...liveNowPlaying }));
   }
 
+  ws.on('close', () => rtcLeave(ws));
+
   ws.on('message', (data) => {
     let msg;
     try { msg = JSON.parse(data.toString()); } catch (_) { return; }
-    if (!msg || msg.type !== 'cmd') return;
+    if (!msg) return;
+    if (msg.type === 'rtc') { handleRtc(ws, msg); return; }
+    if (msg.type !== 'cmd') return;
 
     if (msg.cmd === 'nowplaying') {
       if (ws.isWall && ws.role !== 'monitor') {
@@ -1622,8 +1752,14 @@ server.listen(PORT, HOST, () => {
   for (const ip of lanAddresses()) {
     console.log(`  Im Netz:    http://${ip}:${PORT}/        (Steuerung)`);
     console.log(`              http://${ip}:${PORT}/screen  (Anzeige)`);
+    if (httpsServer) console.log(`              https://${ip}:${HTTPS_PORT}/share   (Bildschirm teilen)`);
   }
   console.log('');
   // Fehlende Video-/YouTube-Längen im Hintergrund nachtragen (für korrektes Scrubboard).
   ensureDurations().then((n) => { if (n) console.log(`  ${n} Video-Länge(n) ermittelt.`); }).catch(() => {});
 });
+if (httpsServer) {
+  httpsServer.listen(HTTPS_PORT, HOST, () => {
+    console.log(`  HTTPS:      https://localhost:${HTTPS_PORT}/ (selbst-signiert)\n`);
+  });
+}

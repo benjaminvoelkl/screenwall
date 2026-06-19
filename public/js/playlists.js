@@ -141,9 +141,8 @@
       const pl = selPl();
       await api('POST', '/api/link', { url, playlistId: pl.id });
     } else if (type === 'screenshare') {
-      const url = prompt('Quelle der Bildschirmübertragung (für später, optional):', '');
-      if (url === null) return;
-      await addItem({ kind: 'content', content: { type: 'screenshare', url: url.trim(), name: 'Bildschirm', durationSec: 15 } });
+      const withAudio = confirm('Ton der Freigabe mitübertragen?\n\nOK = mit Ton, Abbrechen = ohne Ton');
+      await addItem({ kind: 'content', content: { type: 'screenshare', name: 'Bildschirm', withAudio, durationSec: 15 } });
     } else if (type === 'playlist') {
       const refId = $('pl-sub-select').value;
       if (!refId) { alert('Keine Playlist zum Einbetten ausgewählt.'); return; }
@@ -561,9 +560,12 @@
       recheck.addEventListener('click', () => api('POST', '/api/link/recheck', { playlistId: selPl().id, itemId: item.id }));
       ctrls.appendChild(recheck);
     } else if (c.type === 'screenshare') {
-      ctrls.appendChild(field('Dauer (s)', inputNum(c.durationSec, 1, 6000, (v) => patchContent(item.id, { durationSec: v }))));
+      ctrls.appendChild(checkbox('Ton übertragen', c.withAudio, (v) => patchContent(item.id, { withAudio: v })));
       const hint = document.createElement('span');
-      hint.className = 'link-unknown'; hint.textContent = 'vorbereitet (noch ohne Wiedergabe)';
+      hint.className = 'link-unknown';
+      hint.textContent = c.sessionId
+        ? 'Link/QR erscheinen auf der Wall, sobald der Block live ist.'
+        : 'Erst „Live schalten“, dann erscheint der Teil-Link auf der Wall.';
       ctrls.appendChild(hint);
     }
 

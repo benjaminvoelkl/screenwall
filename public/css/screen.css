@@ -96,6 +96,19 @@ body.idle { cursor: none; }
   word-break: break-all;
 }
 
+/* --- Bildschirmfreigabe (WebRTC) --- */
+/* Solange kein Stream ankommt, zeigt der Block den Beitritts-Hinweis (Link+QR);
+   sobald Video läuft, wird der Hinweis ausgeblendet und das Video gezeigt. */
+.screenshare video { display: none; background: #000; }
+.screenshare.live video { display: block; }
+.screenshare.live .share-notice { display: none; }
+.share-notice .share-qr {
+  width: 26vh; height: 26vh; margin: 3vh auto 0;
+  background: #fff; padding: 1.5vh; border-radius: 8px;
+}
+.share-notice .share-qr img { width: 100%; height: 100%; display: block; }
+.share-notice .link-notice-url { margin-top: 1vh; }
+
 /* --- Overlays (mehrere Layer über dem Content; Elemente frei positioniert) --- */
 .overlays { position: fixed; inset: 0; z-index: 500; pointer-events: none; }
 .ov-layer { position: absolute; inset: 0; transition: opacity 0.4s ease; }
