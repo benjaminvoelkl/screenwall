@@ -113,6 +113,8 @@
 
   // ===== Rendering =========================================================
   const TYPE_BADGE = { color: '🎨', image: '🖼', video: '🎬', youtube: '▶', webpage: '🌐', screenshare: '🖥' };
+  // Ebenen-/Layer-Icon (gestapelte Ebenen) für die Overlay-Spur.
+  const LAYERS_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 2 8l10 5 10-5-10-5z"/><path d="M2 12l10 5 10-5"/><path d="M2 16l10 5 10-5"/></svg>';
 
   // Zoom: Slider 0 = max. Detail, 100 = "Alles" (komplette Timeline passt in die
   // sichtbare Breite). Fit-Wert ergibt sich aus Gesamtdauer und Containerbreite.
@@ -147,6 +149,9 @@
     $('prog-empty').classList.toggle('hidden', !empty);
     $('tl-grid').classList.toggle('hidden', empty);
     $('tl-total').textContent = `Gesamt: ${fmtClock(total)}`;
+    // Chips & Highlights auch ohne Inhalte zeichnen (Highlights sind global).
+    renderChapterChips();
+    renderHighlights();
     if (empty) { return; }
 
     // 2) Zoom bestimmen (Fit braucht die Gesamtdauer).
@@ -166,6 +171,7 @@
 
     renderRuler(widthPx);
     renderContent();
+    renderChapterLane();
     renderOverlayLanes();
     if (playheadT > total) playheadT = total;
     positionPlayhead();
@@ -325,7 +331,7 @@
     const groups = [];
     for (const o of (state.overlays || [])) { const cs = clips.filter((c) => c.overlayId === o.id); if (cs.length) groups.push({ o, clips: cs }); }
     if (!groups.length) {
-      const gl = el2('div', 'tl-gutter-label'); gl.innerHTML = '<span class="ic">✦</span> Overlay';
+      const gl = el2('div', 'tl-gutter-label'); gl.innerHTML = `<span class="ic">${LAYERS_ICON}</span> Overlay`;
       gut.appendChild(gl);
       const lane = el2('div', 'tl-lane empty'); lane.textContent = 'Keine Overlay-Fenster – oben „+ Fenster" / „✦ + Overlay"';
       lanes.appendChild(lane);
@@ -333,7 +339,7 @@
     }
     for (const g of groups) {
       const gl = el2('div', 'tl-gutter-label');
-      const ic = el2('span', 'ic'); ic.textContent = '✦';
+      const ic = el2('span', 'ic'); ic.innerHTML = LAYERS_ICON;
       const nm = el2('span'); nm.textContent = g.o.name; nm.style.cssText = 'flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
       const add = el2('button', 'tl-ov-eye'); add.textContent = '＋'; add.title = 'Weiteres Fenster am Playhead';
       add.addEventListener('click', () => apiAddClip(g.o.id, playheadT));
@@ -422,6 +428,168 @@
     });
   }
 
+  // ===== Kapitel (benannte Bereiche; schnelles Springen) ===================
+  function chaptersOf(pl) { return (pl && pl.chapters) || []; }
+  function apiPatchChapter(id, fields) {
+    fetch(`/api/playlist/${state.playlists.rootId}/chapters/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(fields) });
+  }
+  function apiDeleteChapter(id) {
+    fetch(`/api/playlist/${state.playlists.rootId}/chapters/${id}`, { method: 'DELETE' });
+  }
+  // Live-Sprung (wirkt sofort auf der Wand) an den Kapitelanfang.
+  function jumpChapterLive(chapterId) {
+    fetch('/api/play', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ playlistId: state.playlists.rootId, chapterId }) });
+  }
+  function addChapterHere() {
+    const name = prompt('Kapitelname:', `Kapitel ${fmtClock(playheadT)}`);
+    if (name == null) return;
+    fetch(`/api/playlist/${state.playlists.rootId}/chapters`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() || 'Kapitel', start: Math.round(playheadT) }) });
+  }
+
+  function renderChapterLane() {
+    const lane = $('lane-chapters');
+    lane.innerHTML = '';
+    const chs = chaptersOf(rootPlaylist());
+    if (!chs.length) { lane.classList.add('empty'); lane.textContent = 'Keine Kapitel – „📑 + Kapitel" am Playhead'; return; }
+    lane.classList.remove('empty');
+    for (let i = 0; i < chs.length; i++) {
+      const c = chs[i], next = chs[i + 1];
+      // Ende: feste Dauer, sonst bis zum nächsten Kapitel bzw. Programmende.
+      const end = c.duration != null ? Math.min(total, (c.start || 0) + c.duration) : (next ? next.start : total);
+      lane.appendChild(buildChapterSeg(c, end));
+    }
+  }
+  function buildChapterSeg(c, end) {
+    const start = c.start || 0;
+    const seg = el2('div', 'tl-chapter');
+    seg.style.left = start * pxPerSec + 'px';
+    seg.style.width = Math.max(10, (end - start) * pxPerSec) + 'px';
+    seg.style.setProperty('--chap-color', c.color || '#4f8cff');
+    const lh = el2('div', 'tl-ov-handle l'), rh = el2('div', 'tl-ov-handle r');
+    const label = el2('span', 'tl-ov-label'); label.textContent = c.name;
+    const ren = el2('button', 'tl-ov-eye'); ren.textContent = '✏'; ren.title = 'Umbenennen';
+    ren.addEventListener('pointerdown', (e) => e.stopPropagation());
+    ren.addEventListener('click', (e) => { e.stopPropagation(); const n = prompt('Kapitelname:', c.name); if (n != null) apiPatchChapter(c.id, { name: n.trim() || 'Kapitel' }); });
+    const del = el2('button', 'tl-ov-eye'); del.textContent = '🗑'; del.title = 'Kapitel löschen';
+    del.addEventListener('pointerdown', (e) => e.stopPropagation());
+    del.addEventListener('click', (e) => { e.stopPropagation(); apiDeleteChapter(c.id); });
+    seg.append(lh, label, ren, del, rh);
+    bindChapterDrag(seg, c);
+    bindChapterTrim(lh, c, 'l'); bindChapterTrim(rh, c, 'r');
+    // Klick im Editor = Vorschau an den Anfang scrubben.
+    seg.addEventListener('click', () => { if (!suppressClick) scrubTo(c.start || 0); });
+    return seg;
+  }
+  function bindChapterDrag(seg, c) {
+    seg.addEventListener('pointerdown', (e) => {
+      if (e.target.classList.contains('tl-ov-handle')) return;
+      e.stopPropagation();
+      seg.setPointerCapture(e.pointerId);
+      const sx = e.clientX, orig = c.start || 0; let moved = false;
+      const move = (m) => {
+        if (Math.abs(m.clientX - sx) > 3) moved = true;
+        seg._ns = Math.max(0, Math.min(total, orig + (m.clientX - sx) / pxPerSec));
+        seg.style.left = seg._ns * pxPerSec + 'px';
+      };
+      const up = () => {
+        seg.removeEventListener('pointermove', move); seg.removeEventListener('pointerup', up);
+        if (moved) { suppressClick = true; setTimeout(() => { suppressClick = false; }, 50); apiPatchChapter(c.id, { start: Math.round(seg._ns) }); }
+      };
+      seg.addEventListener('pointermove', move); seg.addEventListener('pointerup', up);
+    });
+  }
+  function bindChapterTrim(handle, c, side) {
+    handle.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      handle.setPointerCapture(e.pointerId);
+      const seg = handle.parentElement;
+      const start0 = c.start || 0;
+      const end0 = start0 + (seg.offsetWidth / pxPerSec); // aktuelles Ende (auch bei null-Dauer)
+      const move = (m) => {
+        const t = Math.max(0, Math.min(total, timeAtX(m.clientX)));
+        let s = start0, en = end0;
+        if (side === 'r') en = Math.max(s + 0.5, t); else s = Math.min(end0 - 0.5, t);
+        seg.style.left = s * pxPerSec + 'px';
+        seg.style.width = Math.max(10, (en - s) * pxPerSec) + 'px';
+        seg._s = s; seg._dur = en - s;
+      };
+      const up = () => {
+        handle.removeEventListener('pointermove', move); handle.removeEventListener('pointerup', up);
+        suppressClick = true; setTimeout(() => { suppressClick = false; }, 50);
+        apiPatchChapter(c.id, { start: Math.round(seg._s != null ? seg._s : start0), duration: Math.round(seg._dur != null ? seg._dur : (end0 - start0)) });
+      };
+      handle.addEventListener('pointermove', move); handle.addEventListener('pointerup', up);
+    });
+  }
+  function renderChapterChips() {
+    const bar = $('chapter-chips');
+    bar.innerHTML = '';
+    const chs = chaptersOf(rootPlaylist());
+    bar.classList.toggle('hidden', !chs.length);
+    for (const c of chs) {
+      const chip = el2('button', 'chapter-chip');
+      chip.style.setProperty('--chap-color', c.color || '#4f8cff');
+      const dot = el2('span', 'chip-dot');
+      const nm = el2('span'); nm.textContent = c.name;
+      const tm = el2('span', 'chip-time'); tm.textContent = fmtClock(c.start || 0);
+      chip.append(dot, nm, tm);
+      chip.title = 'Live an diese Stelle springen';
+      chip.addEventListener('click', () => jumpChapterLive(c.id));
+      bar.appendChild(chip);
+    }
+  }
+
+  // ===== Highlights (kuratierte, playlist-übergreifende Schnellzugriffe) ====
+  function jumpHighlightLive(id) {
+    fetch('/api/play', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ highlightId: id }) });
+  }
+  function apiPatchHighlight(id, fields) { fetch(`/api/highlights/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(fields) }); }
+  function apiDeleteHighlight(id) { fetch(`/api/highlights/${id}`, { method: 'DELETE' }); }
+  function moveHighlight(idx, dir) {
+    const ids = (state.highlights || []).map((h) => h.id);
+    const j = idx + dir; if (j < 0 || j >= ids.length) return;
+    [ids[idx], ids[j]] = [ids[j], ids[idx]];
+    fetch('/api/highlights/order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ order: ids }) });
+  }
+  function addHighlightHere() {
+    const name = prompt('Name des Highlights:', `Highlight ${fmtClock(playheadT)}`);
+    if (name == null) return;
+    fetch('/api/highlights', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() || 'Highlight', playlistId: state.playlists.rootId, start: Math.round(playheadT) }) });
+  }
+  function renderHighlights() {
+    const list = $('highlights-list');
+    if (!list) return;
+    list.innerHTML = '';
+    const hls = state.highlights || [];
+    if (!hls.length) {
+      const hint = el2('span', 'hint'); hint.style.margin = '0';
+      hint.textContent = 'Noch keine Highlights – „⭐ + Highlight" speichert die aktuelle Position.';
+      list.appendChild(hint); return;
+    }
+    const byId = state.playlists.byId;
+    hls.forEach((h, idx) => {
+      const card = el2('div', 'hl-card');
+      card.style.setProperty('--hl-color', h.color || '#f6c453');
+      const jump = el2('button', 'hl-btn');
+      const nm = el2('span', 'hl-name'); nm.textContent = h.name;
+      const meta = el2('span', 'hl-meta'); meta.textContent = `${byId[h.playlistId] ? byId[h.playlistId].name : '??'} · ${fmtClock(h.start || 0)}`;
+      jump.append(nm, meta); jump.title = 'Live dorthin springen';
+      jump.addEventListener('click', () => jumpHighlightLive(h.id));
+      const ctr = el2('div', 'hl-ctrls');
+      const up = el2('button', 'hl-mini'); up.textContent = '↑'; up.title = 'nach oben'; up.disabled = idx === 0;
+      up.addEventListener('click', () => moveHighlight(idx, -1));
+      const down = el2('button', 'hl-mini'); down.textContent = '↓'; down.title = 'nach unten'; down.disabled = idx === hls.length - 1;
+      down.addEventListener('click', () => moveHighlight(idx, 1));
+      const ren = el2('button', 'hl-mini'); ren.textContent = '✏'; ren.title = 'Umbenennen';
+      ren.addEventListener('click', () => { const n = prompt('Highlight-Name:', h.name); if (n != null) apiPatchHighlight(h.id, { name: n.trim() || 'Highlight' }); });
+      const del = el2('button', 'hl-mini'); del.textContent = '🗑'; del.title = 'Löschen';
+      del.addEventListener('click', () => { if (confirm(`Highlight „${h.name}" löschen?`)) apiDeleteHighlight(h.id); });
+      ctr.append(up, down, ren, del);
+      card.append(jump, ctr);
+      list.appendChild(card);
+    });
+  }
+
   function positionPlayhead() {
     const px = playheadT * pxPerSec;
     $('tl-playhead').style.left = px + 'px';
@@ -478,17 +646,63 @@
     tracks.addEventListener('pointercancel', end);
   })();
 
-  // Zoomen verankert: Zeit unter der Viewport-Mitte bleibt nach dem Render erhalten.
-  function applyZoom() {
+  // Zoomen verankert: Die Zeit unter dem Anker (Cursor/Pinch-Mitte, sonst
+  // Viewport-Mitte) bleibt nach dem Render an Ort und Stelle.
+  function applyZoom(anchorClientX) {
     const sc = $('tl-scroll');
-    const anchorT = pxPerSec > 0 ? (sc.scrollLeft + sc.clientWidth / 2) / pxPerSec : 0;
+    const rect = sc.getBoundingClientRect();
+    const ax = (anchorClientX != null) ? (anchorClientX - rect.left) : sc.clientWidth / 2;
+    const anchorT = pxPerSec > 0 ? (sc.scrollLeft + ax) / pxPerSec : 0;
     zooming = true;
     render();
-    sc.scrollLeft = Math.max(0, anchorT * pxPerSec - sc.clientWidth / 2);
+    sc.scrollLeft = Math.max(0, anchorT * pxPerSec - ax);
     zooming = false;
   }
-  $('tl-zoom').addEventListener('input', applyZoom);
-  $('tl-fit').addEventListener('click', () => { $('tl-zoom').value = 100; applyZoom(); });
+  // Direkt auf eine Ziel-pxPerSec zoomen (Wheel/Pinch): clampen + Slider-Formel
+  // invertieren, damit der Regler synchron bleibt.
+  function setZoomByPps(targetPps, anchorClientX) {
+    const fit = fitPxPerSec();
+    const detail = Math.max(fit, MAX_DETAIL_PX);
+    const pps = Math.max(fit, Math.min(detail, targetPps));
+    const v = detail > fit ? 100 - 100 * Math.log(pps / fit) / Math.log(detail / fit) : 100;
+    $('tl-zoom').value = String(Math.max(0, Math.min(100, Math.round(v))));
+    applyZoom(anchorClientX);
+  }
+  $('tl-zoom').addEventListener('input', () => applyZoom());
+
+  // Mausrad/Trackpad über dem Scrubboard zoomt am Cursor (statt zu scrollen).
+  $('tl-scroll').addEventListener('wheel', (e) => {
+    e.preventDefault();
+    setZoomByPps(pxPerSec * (e.deltaY < 0 ? 1.15 : 0.87), e.clientX);
+  }, { passive: false });
+
+  // Zwei-Finger-Pinch (Touch) zoomt; ein Finger bleibt Scrubben.
+  const pinchPts = new Map();
+  let pinch = null; // { startDist, startPps }
+  const sc0 = $('tl-scroll');
+  sc0.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'touch') return;
+    pinchPts.set(e.pointerId, e);
+    if (pinchPts.size === 2) {
+      scrubbing = false; // laufendes Scrubben abbrechen
+      const [a, b] = [...pinchPts.values()];
+      pinch = { startDist: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1, startPps: pxPerSec };
+    }
+  });
+  sc0.addEventListener('pointermove', (e) => {
+    if (!pinchPts.has(e.pointerId)) return;
+    pinchPts.set(e.pointerId, e);
+    if (pinch && pinchPts.size === 2) {
+      e.preventDefault();
+      const [a, b] = [...pinchPts.values()];
+      const dist = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1;
+      const midX = (a.clientX + b.clientX) / 2;
+      setZoomByPps(pinch.startPps * (dist / pinch.startDist), midX);
+    }
+  }, { passive: false });
+  const endPinch = (e) => { pinchPts.delete(e.pointerId); if (pinchPts.size < 2) pinch = null; };
+  sc0.addEventListener('pointerup', endPinch);
+  sc0.addEventListener('pointercancel', endPinch);
   // Neues Overlay anlegen + Fenster (Clip) am Playhead, dann zum Editor.
   $('tl-add-overlay').addEventListener('click', async () => {
     const r = await fetch('/api/overlay', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
@@ -500,10 +714,14 @@
     const id = $('tl-ov-pick').value;
     if (id) apiAddClip(id, playheadT);
   });
-  window.addEventListener('resize', () => { scaleInlinePreview(); render(); });
+  // Kapitel / Highlight am Playhead anlegen.
+  $('tl-add-chapter').addEventListener('click', addChapterHere);
+  $('tl-add-highlight').addEventListener('click', addHighlightHere);
+  window.addEventListener('resize', () => { syncPreviewTop(); updatePreviewCollapse(); render(); });
 
   // ===== Vorschau-Skalierung (18:16) =======================================
   const PREVIEW_W = 4320, PREVIEW_H = 3840;
+  let previewH = 0; // aktuelle Vorschauhöhe (px), vom Scroll-Collapse gesteuert
   function scalePreview(stage, wrap, availW, availH) {
     if (!stage || stage.offsetParent === null) return;
     const scale = Math.max(0.01, Math.min(availW / PREVIEW_W, availH / PREVIEW_H));
@@ -511,15 +729,38 @@
     stage.style.height = Math.round(PREVIEW_H * scale) + 'px';
     wrap.style.transform = `scale(${scale})`;
   }
+  // Collapsing-Header: oben groß (BIG), beim Runterscrollen bis zur jetzigen Größe
+  // (MIN) schrumpfen; danach bleibt die Vorschau sticky und nur das Scrubboard scrollt.
+  function previewBounds() {
+    const big = window.innerHeight * 0.62;
+    const min = window.innerHeight * 0.42;
+    // Schrumpfrate ~0,5 (range = 2*Δ) → kein Scroll-Feedback-Ruckeln.
+    return { big, min, range: Math.max(120, (big - min) * 2) };
+  }
   function scaleInlinePreview() {
     const stage = $('prev-stage');
     const availW = (stage.parentElement.clientWidth || window.innerWidth) - 28;
-    scalePreview(stage, $('prev-frame-wrap'), availW, window.innerHeight * 0.42);
+    if (!previewH) previewH = previewBounds().big;
+    scalePreview(stage, $('prev-frame-wrap'), availW, previewH);
+  }
+  function updatePreviewCollapse() {
+    const { big, min, range } = previewBounds();
+    const y = window.scrollY || document.documentElement.scrollTop || 0;
+    const p = Math.max(0, Math.min(1, y / range));
+    previewH = big + (min - big) * p;
+    scaleInlinePreview();
+  }
+  // Vorschau klebt unter der (sticky) Topbar – top auf deren Höhe setzen.
+  function syncPreviewTop() {
+    const tb = document.querySelector('.topbar');
+    const sec = document.querySelector('.prog-preview');
+    if (sec) sec.style.top = (tb ? tb.offsetHeight : 0) + 'px';
   }
   function scaleGolivePreview() {
     scalePreview($('golive-stage'), $('golive-frame-wrap'), window.innerWidth * 0.9, window.innerHeight * 0.62);
   }
-  requestAnimationFrame(scaleInlinePreview);
+  window.addEventListener('scroll', updatePreviewCollapse, { passive: true });
+  requestAnimationFrame(() => { syncPreviewTop(); updatePreviewCollapse(); });
   setPreviewMode('live'); // Start als Live-Spiegel der Wand (F5-fest); dirty -> Entwurf
 
   // ===== Vorschau-Modus (Live-Spiegel <-> Entwurf) =========================

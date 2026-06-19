@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Screenwall – Dokumentation</title>
+  <link rel="stylesheet" href="/css/control.css" />
+  <style>
+    .docs-main { max-width: 920px; margin: 0 auto; padding: 16px 20px 60px; }
+    .docs-nav { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 20px; }
+    .docs-nav a {
+      padding: 7px 13px; border-radius: 999px; font-size: 14px; text-decoration: none;
+      background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+    }
+    .docs-nav a:hover { border-color: var(--accent); }
+    .docs-nav a.active { background: var(--accent); border-color: var(--accent); color: #0a0a0d; font-weight: 700; }
+    .docs-body { line-height: 1.6; color: var(--text); }
+    .docs-body h1 { font-size: 26px; margin: 0 0 12px; }
+    .docs-body h2 { font-size: 20px; margin: 28px 0 10px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+    .docs-body h3 { font-size: 16px; margin: 20px 0 8px; }
+    .docs-body p, .docs-body li { color: var(--text); }
+    .docs-body a { color: var(--accent); }
+    .docs-body code { background: var(--panel-2); padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
+    .docs-body pre { background: #0c0f14; border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; overflow-x: auto; }
+    .docs-body pre code { background: none; padding: 0; }
+    .docs-body table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+    .docs-body th, .docs-body td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; font-size: 14px; }
+    .docs-body th { background: var(--panel-2); }
+    .docs-body blockquote { border-left: 3px solid var(--accent); margin: 12px 0; padding: 4px 14px; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-title">
+      <a class="back-link" href="/" title="Zum Live-Monitor">← Live-Monitor</a>
+      <h1>Dokumentation</h1>
+    </div>
+    <div class="topbar-actions">
+      <a class="back-link" href="/programm">Programm →</a>
+    </div>
+  </header>
+
+  <main class="docs-main">
+    <nav class="docs-nav" id="docs-nav"></nav>
+    <article class="docs-body" id="docs-body">Lade…</article>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script>
+    (() => {
+      const DOCS = [
+        { key: 'benutzer',   title: '📖 Benutzerhandbuch', url: '/docs/benutzer.md' },
+        { key: 'api',        title: '🔌 API',              url: '/API.md' },
+        { key: 'entwickler', title: '🛠 Entwickler & Deployment', url: '/docs/entwickler.md' },
+        { key: 'agents',     title: '🤖 KI-Agenten (LLM)', url: '/LLM.md' }
+      ];
+      const params = new URLSearchParams(location.search);
+      const cur = DOCS.find((d) => d.key === params.get('d')) || DOCS[0];
+
+      const nav = document.getElementById('docs-nav');
+      for (const d of DOCS) {
+        const a = document.createElement('a');
+        a.href = '/docs?d=' + d.key;
+        a.textContent = d.title;
+        if (d.key === cur.key) a.classList.add('active');
+        nav.appendChild(a);
+      }
+
+      const body = document.getElementById('docs-body');
+      const escapeHtml = (s) => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+      fetch(cur.url)
+        .then((r) => r.ok ? r.text() : Promise.reject(new Error('HTTP ' + r.status)))
+        .then((md) => {
+          document.title = 'Screenwall – ' + cur.title.replace(/^[^\w]+/, '');
+          // marked rendert Markdown; fehlt das CDN (offline), Rohtext anzeigen.
+          if (window.marked && typeof window.marked.parse === 'function') {
+            body.innerHTML = window.marked.parse(md);
+          } else {
+            body.innerHTML = '<pre>' + escapeHtml(md) + '</pre>';
+          }
+        })
+        .catch((e) => { body.innerHTML = '<p>Dokument konnte nicht geladen werden: ' + escapeHtml(String(e.message)) + '</p>'; });
+    })();
+  </script>
+</body>
+</html>

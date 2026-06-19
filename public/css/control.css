@@ -123,9 +123,13 @@ html, body {
 /* Footer: Verbindungsstatus + Lautstärke + /screen-Link */
 .footer {
   display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  flex-wrap: wrap;
   max-width: 880px; margin: 8px auto 0; padding: 16px 20px;
   border-top: 1px solid var(--border); color: var(--muted); font-size: 14px;
 }
+.footer-docs { display: flex; flex-wrap: wrap; gap: 12px; }
+.footer-docs a { color: var(--muted); text-decoration: none; }
+.footer-docs a:hover { color: var(--accent); text-decoration: underline; }
 .vol { display: flex; align-items: center; gap: 8px; }
 .vol-icon {
   background: none; border: 0; color: var(--text); font-size: 17px;
@@ -313,7 +317,7 @@ textarea { resize: vertical; }
 .pl-main { padding: 16px 20px 28px; max-width: 1100px; margin: 0 auto; }
 .pl-overview-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
 .pl-overview-head h2 { margin: 0; font-size: 18px; }
-.pl-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }
+.pl-cards { display: flex; flex-direction: column; gap: 16px; }
 .pl-card {
   background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
   padding: 14px; display: flex; flex-direction: column; gap: 10px;
@@ -329,16 +333,31 @@ textarea { resize: vertical; }
 .pl-card-acts { display: flex; gap: 8px; flex-wrap: wrap; }
 .pl-card-acts .btn { padding: 7px 12px; font-size: 13px; }
 
+/* Storyboard = volle Breite als proportionale Zeitleiste (wie das Scrubboard).
+   Jede Playlist füllt die Kartenbreite; Blockbreite = Anteil an der Gesamtdauer. */
 .pl-storyboard {
-  display: flex; gap: 4px; overflow-x: auto; min-height: 84px; align-items: stretch;
+  display: flex; width: 100%; height: 92px; align-items: stretch; overflow: hidden;
   background: #0c0f14; border-radius: 8px; padding: 6px;
 }
 .pl-storyboard.empty { align-items: center; justify-content: center; color: var(--muted); font-size: 13px; }
 .pl-sb-block {
-  position: relative; flex: 0 0 auto; height: 72px; border-radius: 6px; overflow: hidden;
+  position: relative; flex: 0 0 auto; min-width: 2px; overflow: hidden;
   background: var(--panel-2); background-size: cover; background-position: center;
+  border-right: 1px solid #0c0f14;
+  display: flex; flex-direction: column; justify-content: flex-end;
 }
-.pl-sb-badge { position: absolute; top: 3px; left: 4px; font-size: 13px; z-index: 1; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.7)); }
+.pl-sb-block:last-child { border-right: 0; }
+.pl-sb-block::after { /* Lesbarkeit der Labels über Thumbnails */
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(180deg, rgba(0,0,0,0) 45%, rgba(0,0,0,0.72) 100%);
+  pointer-events: none;
+}
+.pl-sb-badge { position: absolute; top: 4px; left: 6px; font-size: 15px; z-index: 1; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.7)); }
+.pl-sb-label {
+  position: relative; z-index: 1; padding: 0 6px 5px; font-size: 11px; color: #fff;
+  font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pl-sb-dur { font-weight: 500; color: #d6dbe6; font-variant-numeric: tabular-nums; }
 .pl-fs { position: absolute; inset: 0; }
 .pl-fr { position: absolute; top: 0; bottom: 0; height: 100%; object-fit: cover; }
 .pl-fr.sb { background-repeat: no-repeat; }

@@ -21,7 +21,7 @@ const tools = [
   { name: 'get_status', description: 'Aktuellen Wiedergabestatus abfragen (aktive Playlist, was läuft, Restzeit, aktive Overlays).', input_schema: { type: 'object', properties: {} } },
   { name: 'list_playlists', description: 'Alle Playlists mit Namen, Gesamtdauer, Aktiv-Flag und Overlay-Fenstern auflisten.', input_schema: { type: 'object', properties: {} } },
   { name: 'get_playlist', description: 'Eine Playlist inkl. ausgeflachter Inhalte holen.', input_schema: { type: 'object', properties: { playlistId: { type: 'string' } }, required: ['playlistId'] } },
-  { name: 'play', description: 'Eine Playlist sofort übertragen, optional ab Sekunde (time) ODER Prozent (percent, 0-100, hat Vorrang).', input_schema: { type: 'object', properties: { playlistId: { type: 'string' }, time: { type: 'number' }, percent: { type: 'number' } }, required: ['playlistId'] } },
+  { name: 'play', description: 'Eine Playlist sofort übertragen, optional ab Sekunde (time) ODER Prozent (percent, 0-100, hat Vorrang). Auch direkt zu einem Kapitel ({playlistId, chapterId}) oder Highlight ({highlightId}) springen.', input_schema: { type: 'object', properties: { playlistId: { type: 'string' }, time: { type: 'number' }, percent: { type: 'number' }, chapterId: { type: 'string' }, highlightId: { type: 'string' } } } },
   { name: 'create_playlist', description: 'Playlist anlegen und optional mit Inhalten befüllen. description = Kontext für spätere Auswahl. items[] = content-Objekte (type: color|image|video|youtube|webpage|screenshare). screenshare = entfernten Bildschirm einblenden (optional withAudio); die Wand zeigt dann Link+QR zum Teilen.', input_schema: { type: 'object', properties: { name: { type: 'string' }, description: { type: 'string' }, items: { type: 'array', items: { type: 'object' } } }, required: ['name'] } },
   { name: 'set_playlist_meta', description: 'Name und/oder Beschreibung (Kontext für Auswahl) einer Playlist setzen.', input_schema: { type: 'object', properties: { playlistId: { type: 'string' }, name: { type: 'string' }, description: { type: 'string' } }, required: ['playlistId'] } },
   { name: 'set_element', description: 'Inhalt eines Overlay-Elements live setzen. eid via list_overlays. value passt sich dem Typ an (text/url/data).', input_schema: { type: 'object', properties: { eid: { type: 'string' }, value: { type: 'string' }, text: { type: 'string' }, url: { type: 'string' }, data: { type: 'string' }, fill: { type: 'string' } }, required: ['eid'] } },
@@ -36,7 +36,12 @@ const tools = [
   { name: 'delete_element', description: 'Element aus einem Overlay entfernen (z. B. Banner-Fläche/Logos). NUR ENTWURF → danach go_live.', input_schema: { type: 'object', properties: { overlayId: { type: 'string' }, eid: { type: 'string' } }, required: ['overlayId', 'eid'] } },
   { name: 'remove_overlay_window', description: 'Overlay-Fenster (Clip) aus einer Playlist entfernen → Overlay dort nicht mehr zeigen. clipId aus list_playlists/get_status. NUR ENTWURF → danach go_live.', input_schema: { type: 'object', properties: { playlistId: { type: 'string' }, clipId: { type: 'string' } }, required: ['playlistId', 'clipId'] } },
   { name: 'flash', description: 'Inhalt SOFORT für N Sekunden zentriert einblenden, verschwindet selbst (kein go_live). Genau eins von qr/text/image. Für "zeig … jetzt für X Sekunden".', input_schema: { type: 'object', properties: { qr: { type: 'string' }, text: { type: 'string' }, image: { type: 'string' }, seconds: { type: 'number' }, color: { type: 'string' }, pos: { type: 'string', enum: ['center', 'top', 'bottom'] } } } },
-  { name: 'flash_clear', description: 'Laufende Flash-Einblendungen entfernen (Body {} = alle).', input_schema: { type: 'object', properties: { id: { type: 'string' } } } }
+  { name: 'flash_clear', description: 'Laufende Flash-Einblendungen entfernen (Body {} = alle).', input_schema: { type: 'object', properties: { id: { type: 'string' } } } },
+  { name: 'add_chapter', description: 'Kapitel (benannter Bereich zum schnellen Springen) in einer Playlist anlegen. start = Sekunden ab Playlist-Anfang, duration optional. Wirkt im Entwurf; zum Springen ist kein go_live nötig (play veröffentlicht).', input_schema: { type: 'object', properties: { playlistId: { type: 'string' }, name: { type: 'string' }, start: { type: 'number' }, duration: { type: 'number' }, color: { type: 'string' } }, required: ['playlistId', 'name', 'start'] } },
+  { name: 'jump_to_chapter', description: 'Sofort live an den Anfang eines Kapitels springen. chapterId aus get_playlist (chapters[]).', input_schema: { type: 'object', properties: { playlistId: { type: 'string' }, chapterId: { type: 'string' } }, required: ['playlistId', 'chapterId'] } },
+  { name: 'list_highlights', description: 'Kuratierte, playlist-übergreifende Highlights (Schnellzugriffe) auflisten.', input_schema: { type: 'object', properties: {} } },
+  { name: 'add_highlight', description: 'Highlight (kuratierter Schnellzugriff) anlegen: zeigt auf playlistId + Startzeit (Sekunden).', input_schema: { type: 'object', properties: { name: { type: 'string' }, playlistId: { type: 'string' }, start: { type: 'number' }, duration: { type: 'number' }, color: { type: 'string' } }, required: ['name', 'playlistId', 'start'] } },
+  { name: 'jump_to_highlight', description: 'Sofort live zu einem Highlight springen. highlightId aus list_highlights.', input_schema: { type: 'object', properties: { highlightId: { type: 'string' } }, required: ['highlightId'] } }
 ];
 
 const enc = encodeURIComponent;
@@ -45,7 +50,7 @@ const ROUTES = {
   get_status: () => ['GET', '/api/status'],
   list_playlists: () => ['GET', '/api/playlists'],
   get_playlist: (i) => ['GET', `/api/playlists/${enc(i.playlistId)}`],
-  play: (i) => ['POST', '/api/play', pick(i, ['playlistId', 'time', 'percent'])],
+  play: (i) => ['POST', '/api/play', pick(i, ['playlistId', 'time', 'percent', 'chapterId', 'highlightId'])],
   create_playlist: (i) => ['POST', '/api/playlists', pick(i, ['name', 'description', 'items'])],
   set_playlist_meta: (i) => ['POST', `/api/playlist/${enc(i.playlistId)}/rename`, pick(i, ['name', 'description'])],
   set_element: (i) => ['POST', `/api/element/${enc(i.eid)}`, pick(i, ['value', 'text', 'url', 'data', 'fill'])],
@@ -60,7 +65,12 @@ const ROUTES = {
   delete_element: (i) => ['DELETE', `/api/overlay/${enc(i.overlayId)}/element/${enc(i.eid)}`],
   remove_overlay_window: (i) => ['DELETE', `/api/playlist/${enc(i.playlistId)}/overlay-clips/${enc(i.clipId)}`],
   flash: (i) => ['POST', '/api/flash', pick(i, ['qr', 'text', 'image', 'element', 'seconds', 'color', 'pos'])],
-  flash_clear: (i) => ['POST', '/api/flash/clear', pick(i, ['id'])]
+  flash_clear: (i) => ['POST', '/api/flash/clear', pick(i, ['id'])],
+  add_chapter: (i) => ['POST', `/api/playlist/${enc(i.playlistId)}/chapters`, pick(i, ['name', 'start', 'duration', 'color'])],
+  jump_to_chapter: (i) => ['POST', '/api/play', pick(i, ['playlistId', 'chapterId'])],
+  list_highlights: () => ['GET', '/api/highlights'],
+  add_highlight: (i) => ['POST', '/api/highlights', pick(i, ['name', 'playlistId', 'start', 'duration', 'color'])],
+  jump_to_highlight: (i) => ['POST', '/api/play', pick(i, ['highlightId'])]
 };
 
 async function callWall(name, input) {

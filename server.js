@@ -93,7 +93,9 @@ const DEFAULT_STATE = {
   // Overlays: mehrere Zeit-Clips über dem Content (Array = Z-Ordnung, 0 = unten).
   overlays: [],
   // Wiederverwertbare Element-Vorlagen (Flächen/Texte/Bilder, einzeln oder als Gruppe).
-  library: []
+  library: [],
+  // Kuratierte, playlist-übergreifende Schnellzugriffe (Reihenfolge = Array).
+  highlights: []
 };
 
 const newId = () => randomUUID();
@@ -187,11 +189,12 @@ function normalizePlaylists(p) {
       after: ['next', 'loop', 'stop'].includes(pl.after) ? pl.after : 'loop',
       nextId: typeof pl.nextId === 'string' ? pl.nextId : null,
       items,
-      overlayClips: Array.isArray(pl.overlayClips) ? pl.overlayClips.map(normalizeOverlayClip).filter((c) => c.overlayId) : []
+      overlayClips: Array.isArray(pl.overlayClips) ? pl.overlayClips.map(normalizeOverlayClip).filter((c) => c.overlayId) : [],
+      chapters: normalizeChapters(pl.chapters)
     };
   }
   if (Object.keys(byId).length === 0) {
-    byId['pl-default'] = { id: 'pl-default', name: 'Playlist 1', after: 'loop', nextId: null, items: [], overlayClips: [] };
+    byId['pl-default'] = { id: 'pl-default', name: 'Playlist 1', after: 'loop', nextId: null, items: [], overlayClips: [], chapters: [] };
   }
   // Kaputte Referenzen säubern.
   for (const pl of Object.values(byId)) {
@@ -351,6 +354,38 @@ function normalizeOverlayClip(c) {
   };
 }
 
+// Ein Kapitel (benannter Bereich in einer Playlist; zum schnellen Anspringen).
+function normalizeChapter(c) {
+  c = (c && typeof c === 'object') ? c : {};
+  return {
+    id: typeof c.id === 'string' ? c.id : newId(),
+    name: typeof c.name === 'string' ? c.name : 'Kapitel',
+    start: (typeof c.start === 'number' && c.start >= 0) ? c.start : 0,
+    duration: (typeof c.duration === 'number' && c.duration > 0) ? c.duration : null, // null = bis nächstes Kapitel/Ende
+    color: typeof c.color === 'string' ? c.color : '#4f8cff'
+  };
+}
+function normalizeChapters(arr) {
+  if (!Array.isArray(arr)) return [];
+  return arr.map(normalizeChapter).sort((a, b) => a.start - b.start);
+}
+
+// Ein Highlight (kuratierter, playlist-übergreifender Schnellzugriff).
+function normalizeHighlight(h) {
+  h = (h && typeof h === 'object') ? h : {};
+  return {
+    id: typeof h.id === 'string' ? h.id : newId(),
+    name: typeof h.name === 'string' ? h.name : 'Highlight',
+    playlistId: typeof h.playlistId === 'string' ? h.playlistId : '',
+    start: (typeof h.start === 'number' && h.start >= 0) ? h.start : 0,
+    duration: (typeof h.duration === 'number' && h.duration > 0) ? h.duration : null,
+    color: typeof h.color === 'string' ? h.color : '#f6c453'
+  };
+}
+function normalizeHighlights(arr) {
+  return Array.isArray(arr) ? arr.map(normalizeHighlight).filter((h) => h.playlistId) : [];
+}
+
 // Altes Willkommens-Overlay (welcome.*) in ein Overlay mit Elementen überführen.
 function overlayFromWelcome(w) {
   w = w || {};
@@ -456,7 +491,9 @@ function prepareState(loaded) {
   // je einen Clip an der Root-Playlist (idempotent: nur wenn noch kein Clip existiert).
   migrateOverlayWindows(playlists, rawOverlays);
   const library = normalizeLibrary(loaded.library);
-  return { playlists, overlays, library };
+  // Highlights: kaputte playlistId verwerfen (Playlist evtl. gelöscht).
+  const highlights = normalizeHighlights(loaded.highlights).filter((h) => playlists.byId[h.playlistId]);
+  return { playlists, overlays, library, highlights };
 }
 
 // Bestehende (alt-modellierte) Overlay-Zeitfenster in Playlist-Clips überführen.
@@ -764,6 +801,9 @@ const httpsServer = tls ? createHttpsServer(tls, app) : null;
 app.use(express.json({ limit: '2mb' }));
 app.use('/uploads', express.static(UPLOAD_DIR));
 app.use(express.static(PUBLIC_DIR, {
+  // Kein Verzeichnis-Redirect (sonst würde /docs auf /docs/ umgeleitet und die
+  // Viewer-Route /docs nie erreicht).
+  redirect: false,
   setHeaders: (res) => res.set('Cache-Control', 'no-cache')
 }));
 
@@ -775,6 +815,16 @@ app.get('/', (req, res) => {
 app.get('/API.md', (req, res) => {
   res.type('text/markdown');
   res.sendFile(join(__dirname, 'API.md'));
+});
+// Leitfaden für KI-Agenten (liegt im Repo-Root).
+app.get('/LLM.md', (req, res) => {
+  res.type('text/markdown');
+  res.sendFile(join(__dirname, 'LLM.md'));
+});
+// Doku-Viewer (rendert die Markdown-Dokumente; ?d=benutzer|api|entwickler|agents).
+app.get('/docs', (req, res) => {
+  res.set('Cache-Control', 'no-cache');
+  res.sendFile(join(PUBLIC_DIR, 'docs.html'));
 });
 app.get('/screen', (req, res) => {
   res.set('Cache-Control', 'no-cache');
@@ -830,7 +880,7 @@ app.get('/api/playlists', (req, res) => {
   const pls = state.playlists;
   const list = Object.values(pls.byId).map((pl) => {
     const { total } = programEntries(pl.id);
-    return { id: pl.id, name: pl.name, description: pl.description || '', active: pl.id === pls.rootId, itemCount: pl.items.length, totalSec: Math.round(total), after: pl.after, nextId: pl.nextId, overlays: overlaysOfPlaylist(pl) };
+    return { id: pl.id, name: pl.name, description: pl.description || '', active: pl.id === pls.rootId, itemCount: pl.items.length, totalSec: Math.round(total), after: pl.after, nextId: pl.nextId, overlays: overlaysOfPlaylist(pl), chapters: pl.chapters || [] };
   });
   res.json({ rootId: pls.rootId, playlists: list });
 });
@@ -843,7 +893,8 @@ app.get('/api/playlists/:id', (req, res) => {
   res.json({
     id: pl.id, name: pl.name, description: pl.description || '', active: pl.id === state.playlists.rootId, after: pl.after, nextId: pl.nextId, totalSec: Math.round(total),
     items: entries.map((e) => ({ itemId: e.itemId, type: e.content.type, name: e.content.name || e.content.videoId || e.content.url || e.content.type, start: Math.round(e.start), dur: Math.round(e.dur) })),
-    overlays: overlaysOfPlaylist(pl)
+    overlays: overlaysOfPlaylist(pl),
+    chapters: pl.chapters || []
   });
 });
 
@@ -867,14 +918,28 @@ app.post('/api/playlists', async (req, res) => {
   res.json(pl);
 });
 
-// Eine Playlist sofort übertragen – optional ab Sekunde (time) oder Prozent (percent).
+// Eine Playlist sofort übertragen – optional ab Sekunde (time), Prozent (percent),
+// Kapitel ({playlistId, chapterId}) oder Highlight ({highlightId}).
 app.post('/api/play', (req, res) => {
   const b = req.body || {};
-  const pl = getPlaylist(b.playlistId);
+  let playlistId = b.playlistId;
+  let forcedT = null;
+  // Highlight liefert Playlist + Startzeit selbst.
+  if (b.highlightId) {
+    const h = (state.highlights || []).find((x) => x.id === b.highlightId);
+    if (!h) return res.status(404).json({ error: 'Highlight nicht gefunden' });
+    playlistId = h.playlistId; forcedT = h.start;
+  }
+  const pl = getPlaylist(playlistId);
   if (!pl) return res.status(404).json({ error: 'Playlist nicht gefunden' });
   const { entries, total } = programEntries(pl.id);
   let t = 0;
-  if (typeof b.percent === 'number') t = Math.max(0, Math.min(100, b.percent)) / 100 * total;
+  if (forcedT != null) t = Math.max(0, forcedT);
+  else if (b.chapterId) {
+    const ch = (pl.chapters || []).find((c) => c.id === b.chapterId);
+    if (!ch) return res.status(404).json({ error: 'Kapitel nicht gefunden' });
+    t = Math.max(0, ch.start);
+  } else if (typeof b.percent === 'number') t = Math.max(0, Math.min(100, b.percent)) / 100 * total;
   else if (typeof b.time === 'number') t = Math.max(0, b.time);
   const e = entryAtProgTime(entries, t);
   // Programm auf diese Playlist stellen und sofort veröffentlichen (Live-Preview folgt).
@@ -912,7 +977,9 @@ app.get('/api/status', (req, res) => {
       itemDuration: Math.round(itemDuration), itemElapsed: Math.round(itemElapsed), itemRemaining: Math.max(0, Math.round(itemDuration - itemElapsed))
     } : null,
     program: { time: Math.round(progTime), totalSec: Math.round(total), remainingSec: Math.max(0, Math.round(total - progTime)), percent: total > 0 ? Math.round(progTime / total * 100) : 0 },
-    overlaysActive
+    overlaysActive,
+    chapters: (root && root.chapters) || [],
+    highlights: live.highlights || []
   });
 });
 
@@ -1394,6 +1461,88 @@ app.delete('/api/playlist/:id/overlay-clips/:clipId', (req, res) => {
   const i = (pl.overlayClips || []).findIndex((c) => c.id === req.params.clipId);
   if (i === -1) return res.status(404).json({ error: 'Clip nicht gefunden' });
   pl.overlayClips.splice(i, 1);
+  saveState();
+  broadcast();
+  res.json({ ok: true });
+});
+
+// ---- Kapitel (benannte Bereiche je Playlist; zum schnellen Anspringen) ------
+app.post('/api/playlist/:id/chapters', (req, res) => {
+  const pl = getPlaylist(req.params.id);
+  if (!pl) return res.status(404).json({ error: 'Playlist nicht gefunden' });
+  const b = req.body || {};
+  const chapter = normalizeChapter({ name: b.name, start: b.start, duration: b.duration, color: b.color });
+  pl.chapters = normalizeChapters([...(pl.chapters || []), chapter]);
+  saveState();
+  broadcast();
+  res.json(chapter);
+});
+app.patch('/api/playlist/:id/chapters/:chapterId', (req, res) => {
+  const pl = getPlaylist(req.params.id);
+  if (!pl) return res.status(404).json({ error: 'Playlist nicht gefunden' });
+  const ch = (pl.chapters || []).find((c) => c.id === req.params.chapterId);
+  if (!ch) return res.status(404).json({ error: 'Kapitel nicht gefunden' });
+  const p = req.body || {};
+  if (typeof p.name === 'string') ch.name = p.name;
+  if (typeof p.start === 'number' && p.start >= 0) ch.start = p.start;
+  if ('duration' in p) ch.duration = (typeof p.duration === 'number' && p.duration > 0) ? p.duration : null;
+  if (typeof p.color === 'string') ch.color = p.color;
+  pl.chapters = normalizeChapters(pl.chapters); // nach start neu sortieren
+  saveState();
+  broadcast();
+  res.json(ch);
+});
+app.delete('/api/playlist/:id/chapters/:chapterId', (req, res) => {
+  const pl = getPlaylist(req.params.id);
+  if (!pl) return res.status(404).json({ error: 'Playlist nicht gefunden' });
+  const i = (pl.chapters || []).findIndex((c) => c.id === req.params.chapterId);
+  if (i === -1) return res.status(404).json({ error: 'Kapitel nicht gefunden' });
+  pl.chapters.splice(i, 1);
+  saveState();
+  broadcast();
+  res.json({ ok: true });
+});
+
+// ---- Highlights (kuratierte, playlist-übergreifende Schnellzugriffe) --------
+app.get('/api/highlights', (req, res) => res.json({ highlights: state.highlights || [] }));
+app.post('/api/highlights', (req, res) => {
+  const b = req.body || {};
+  if (!getPlaylist(b.playlistId)) return res.status(400).json({ error: 'Playlist nicht gefunden' });
+  const h = normalizeHighlight({ name: b.name, playlistId: b.playlistId, start: b.start, duration: b.duration, color: b.color });
+  state.highlights = state.highlights || [];
+  state.highlights.push(h);
+  saveState();
+  broadcast();
+  res.json(h);
+});
+app.patch('/api/highlights/:id', (req, res) => {
+  const h = (state.highlights || []).find((x) => x.id === req.params.id);
+  if (!h) return res.status(404).json({ error: 'Highlight nicht gefunden' });
+  const p = req.body || {};
+  if (typeof p.name === 'string') h.name = p.name;
+  if (typeof p.playlistId === 'string' && getPlaylist(p.playlistId)) h.playlistId = p.playlistId;
+  if (typeof p.start === 'number' && p.start >= 0) h.start = p.start;
+  if ('duration' in p) h.duration = (typeof p.duration === 'number' && p.duration > 0) ? p.duration : null;
+  if (typeof p.color === 'string') h.color = p.color;
+  saveState();
+  broadcast();
+  res.json(h);
+});
+app.delete('/api/highlights/:id', (req, res) => {
+  const i = (state.highlights || []).findIndex((x) => x.id === req.params.id);
+  if (i === -1) return res.status(404).json({ error: 'Highlight nicht gefunden' });
+  state.highlights.splice(i, 1);
+  saveState();
+  broadcast();
+  res.json({ ok: true });
+});
+app.post('/api/highlights/order', (req, res) => {
+  const order = req.body?.order;
+  if (!Array.isArray(order)) return res.status(400).json({ error: 'order fehlt' });
+  const byId = new Map((state.highlights || []).map((h) => [h.id, h]));
+  const re = order.map((id) => byId.get(id)).filter(Boolean);
+  for (const h of (state.highlights || [])) if (!order.includes(h.id)) re.push(h);
+  state.highlights = re;
   saveState();
   broadcast();
   res.json({ ok: true });

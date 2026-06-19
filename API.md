@@ -146,6 +146,31 @@ je Overlay möglich.
 - Entfernen: `DELETE /api/playlist/:playlistId/overlay-clips/:clipId`
 - ⚠️ **nur Entwurf** → danach `POST /api/golive`.
 
+### Kapitel & Highlights (schnell springen)
+**Kapitel** = benannte **Bereiche** (Start + Dauer) **innerhalb einer Playlist**, zum
+schnellen Anspringen. **Highlights** = eine **separate, kuratierte Liste**
+(playlist-übergreifend) mit eigener Reihenfolge als Schnellzugriff.
+
+Springen läuft über `POST /api/play` und veröffentlicht dabei sofort (kein
+`golive` nötig). Kapitel/Highlights selbst sind Struktur (Entwurf) und erscheinen
+strukturell erst nach `golive` – zum **Anspringen** reicht aber `play`.
+
+- **Kapitel-CRUD** (`start`/`duration` in Sekunden, `duration` weglassen/`null` = bis
+  zum nächsten Kapitel/Programmende; Kapitel sind nach `start` sortiert):
+  - `POST /api/playlist/:id/chapters` `{ "name":"Teil 2", "start":120, "duration":60, "color":"#4f8cff" }`
+  - `PATCH /api/playlist/:id/chapters/:chapterId` `{ "name":"…", "start":…, "duration":…, "color":"…" }`
+  - `DELETE /api/playlist/:id/chapters/:chapterId`
+  - Kapitel werden auch in `GET /api/playlists`, `GET /api/playlists/:id` und
+    `GET /api/status` (aktive Playlist) ausgegeben.
+- **Highlights-CRUD** (global):
+  - `GET /api/highlights` → `{ highlights:[{id,name,playlistId,start,duration,color}] }`
+  - `POST /api/highlights` `{ "name":"Höhepunkt", "playlistId":"<id>", "start":300 }`
+  - `PATCH /api/highlights/:id` · `DELETE /api/highlights/:id`
+  - `POST /api/highlights/order` `{ "order":[id,…] }` (Reihenfolge)
+- **Springen** (sofort live):
+  - Kapitel: `POST /api/play` `{ "playlistId":"<id>", "chapterId":"<cid>" }`
+  - Highlight: `POST /api/play` `{ "highlightId":"<hid>" }`
+
 ### Veröffentlichen (Entwurf → Wand)
 `POST /api/golive` Body `{}` – übernimmt den kompletten Entwurf auf die Wand. **Immer**
 nach Struktur-/Overlay-Bearbeitungen aufrufen (siehe „Live vs. Entwurf" oben).
@@ -380,4 +405,8 @@ Mapping Tool → HTTP (Pfadparameter aus den Argumenten, Rest als JSON-Body):
 `delete_element`→`DELETE /api/overlay/{overlayId}/element/{eid}` ·
 `remove_overlay_window`→`DELETE /api/playlist/{playlistId}/overlay-clips/{clipId}` ·
 `flash`→`POST /api/flash` · `flash_clear`→`POST /api/flash/clear` ·
-`set_playlist_meta`→`POST /api/playlist/{playlistId}/rename`.
+`set_playlist_meta`→`POST /api/playlist/{playlistId}/rename` ·
+`add_chapter`→`POST /api/playlist/{playlistId}/chapters` ·
+`jump_to_chapter`→`POST /api/play` (Body `{playlistId, chapterId}`) ·
+`list_highlights`→`GET /api/highlights` · `add_highlight`→`POST /api/highlights` ·
+`jump_to_highlight`→`POST /api/play` (Body `{highlightId}`).

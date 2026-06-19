@@ -56,6 +56,13 @@
   }
   connect();
   fetch('/api/state').then((r) => r.json()).then((s) => { state = s; render(); });
+  // Übersicht bei Größenänderung neu zeichnen (Zeitleisten füllen die Breite neu).
+  let resizeTimer = null;
+  window.addEventListener('resize', () => {
+    if (detailMode) return;
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => { if (state) renderOverview(); }, 150);
+  });
   // Echte Video-/YouTube-Längen nachtragen, damit die Storyboard-Breiten stimmen.
   fetch('/api/probe-durations', { method: 'POST' }).catch(() => {});
 
@@ -274,10 +281,18 @@
     const pls = playlists();
     const cards = $('pl-cards');
     cards.innerHTML = '';
-    for (const pl of Object.values(pls.byId)) cards.appendChild(buildPlaylistCard(pl, pl.id === pls.rootId));
+    const avail = storyboardWidth();
+    for (const pl of Object.values(pls.byId)) cards.appendChild(buildPlaylistCard(pl, pl.id === pls.rootId, avail));
   }
 
-  function buildPlaylistCard(pl, active) {
+  // Innenbreite, die einer Storyboard-Zeitleiste zur Verfügung steht: Kartenbreite
+  // minus Karten-Padding (14*2) und Storyboard-Padding (6*2).
+  function storyboardWidth() {
+    const w = $('pl-cards').clientWidth || (window.innerWidth - 48);
+    return Math.max(160, w - 40);
+  }
+
+  function buildPlaylistCard(pl, active, avail) {
     const card = document.createElement('div');
     card.className = 'pl-card' + (active ? ' active' : '');
 
@@ -299,7 +314,9 @@
       card.appendChild(desc);
     }
 
-    card.appendChild(buildStoryboard(seq));
+    // px pro Sekunde, sodass die Playlist genau die Kartenbreite füllt.
+    const pps = total > 0 ? avail / total : 0;
+    card.appendChild(buildStoryboard(seq, pps));
 
     const acts = document.createElement('div');
     acts.className = 'pl-card-acts';
@@ -330,7 +347,7 @@
   }
 
   // ----- Storyboard (kompakte Mini-Timeline; Filmstreifen je Video) --------
-  const NOMINAL_END = 30, THUMB_PX = 90, MAXF = 24, SB_PPS = 1.2;
+  const NOMINAL_END = 30, THUMB_PX = 90, MAXF = 24;
   const TYPE_BADGE = { color: '🎨', image: '🖼', video: '🎬', youtube: '▶', webpage: '🌐', screenshare: '🖥' };
   const measured = {}; // hier ungenutzt; Dauern kommen aus videoDuration (Server-Probe)
 
@@ -350,15 +367,16 @@
     return Math.max(1, c.durationSec || 6);
   }
 
-  function buildStoryboard(seq) {
+  // Volle-Breite-Zeitleiste: Blockbreite proportional zur Dauer (pps = px/Sekunde,
+  // vom Aufrufer so gewählt, dass die ganze Playlist die Kartenbreite füllt).
+  function buildStoryboard(seq, pps) {
     const strip = document.createElement('div');
     strip.className = 'pl-storyboard';
     if (!seq.length) { strip.classList.add('empty'); strip.textContent = 'Noch keine Inhalte'; return strip; }
     for (const e of seq) {
       const c = e.content;
       const dur = blockDur(e.itemId, c);
-      const w = Math.round(Math.max(64, Math.min(480, dur * SB_PPS)));
-      const pps = w / Math.max(0.5, dur);
+      const w = Math.max(2, dur * pps);
       const block = document.createElement('div');
       block.className = 'pl-sb-block type-' + c.type;
       block.style.width = w + 'px';
@@ -371,6 +389,14 @@
       } else if (c.type === 'video' && c.filename) block.appendChild(buildFilmstrip(c.filename, dur, pps));
       const badge = document.createElement('span'); badge.className = 'pl-sb-badge'; badge.textContent = TYPE_BADGE[c.type] || '•';
       block.appendChild(badge);
+      // Name + Dauer (wie im Scrubboard) – nur zeigen, wenn der Block breit genug ist.
+      if (w >= 48) {
+        const label = document.createElement('div');
+        label.className = 'pl-sb-label';
+        const name = c.name || TYPE_LABEL[c.type] || c.type;
+        label.innerHTML = `${escapeHtml(name)} <span class="pl-sb-dur">${fmtClock(dur)}</span>`;
+        block.appendChild(label);
+      }
       strip.appendChild(block);
     }
     return strip;
