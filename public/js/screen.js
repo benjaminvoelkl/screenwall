@@ -44,10 +44,11 @@
       : viewer === 'monitor' ? '?role=monitor' : '';
     ws = new WebSocket(`${proto}://${location.host}/${roleParam}`);
 
-    ws.addEventListener('open', () => els.offline.classList.add('hidden'));
+    ws.addEventListener('open', () => { els.offline.classList.add('hidden'); rejoinShare(); });
     ws.addEventListener('message', (ev) => {
       try {
         const msg = JSON.parse(ev.data);
+        if (msg.type === 'rtc') { onRtcMessage(msg); return; }
         if (msg.type === 'state') { applyOffAir(msg.offair); applyState(msg.state); }
         else if (msg.type === 'cmd' && msg.cmd === 'seek') seekCurrent(msg.time);
         else if (msg.type === 'cmd' && msg.cmd === 'goto') gotoEntry(msg.itemId, msg.time, msg.progTime);
@@ -428,6 +429,7 @@
 
   function clearStage() {
     clearTimer();
+    stopShareReceiver();
     [slots[0], slots[1], els.ytLayer].forEach((L) => L.classList.remove('active'));
     slots.forEach((s) => { s.innerHTML = ''; });
     YT.pause();
@@ -447,6 +449,10 @@
     opts = opts || {};
     const c = entry.content;
     clearTimer();
+    // Beim Verlassen eines Screenshare-Blocks die PeerConnection abbauen (der
+    // Capture-Stream beim Publisher bleibt erhalten). buildNode startet bei einem
+    // neuen Screenshare-Block den Empfang erneut.
+    stopShareReceiver();
 
     if (c.type === 'youtube') {
       els.ytLayer.classList.toggle('crop', !!c.crop);
@@ -530,9 +536,37 @@
         node.appendChild(f);
       }
     } else if (c.type === 'screenshare') {
-      node.appendChild(buildNotice('Bildschirmübertragung', c.url || '(noch nicht verfügbar)'));
+      node.classList.add('screenshare');
+      const v = document.createElement('video');
+      v.autoplay = true; v.playsInline = true; v.muted = !c.withAudio;
+      v.className = 'contain';
+      node.appendChild(v);
+      const notice = buildShareNotice(c.sessionId);
+      node.appendChild(notice);
+      // Empfang nur auf Wand/Monitor aufbauen – die Entwurf-Vorschau zeigt nur den Hinweis.
+      if (!isPreview) startShareReceiver(c, node, v);
     }
     return node;
+  }
+
+  // Beitritts-Hinweis für einen Screenshare-Block: Titel, Share-URL und QR-Code.
+  // URL/QR werden asynchron ergänzt, sobald der HTTPS-Port bekannt ist.
+  function buildShareNotice(sessionId) {
+    const wrap = document.createElement('div');
+    wrap.className = 'link-notice share-notice';
+    const box = document.createElement('div'); box.className = 'link-notice-box';
+    const t = document.createElement('div'); t.className = 'link-notice-title';
+    t.textContent = 'Bildschirm hier teilen';
+    const qr = document.createElement('div'); qr.className = 'share-qr';
+    const img = document.createElement('img'); qr.appendChild(img);
+    const u = document.createElement('div'); u.className = 'link-notice-url'; u.textContent = '…';
+    box.appendChild(t); box.appendChild(qr); box.appendChild(u);
+    wrap.appendChild(box);
+    shareUrl(sessionId).then((url) => {
+      u.textContent = url;
+      img.src = `/api/qr?data=${encodeURIComponent(url)}`;
+    });
+    return wrap;
   }
 
   function buildNotice(title, url) {
@@ -545,9 +579,112 @@
     return wrap;
   }
 
+  // ===== Bildschirmfreigabe (WebRTC-Empfang) =============================
+  // Die Wand ist Empfänger (Viewer): Sie tritt der Session des Screenshare-Blocks
+  // bei; der teilende Browser (Publisher) baut die Verbindung auf. Pro Publisher
+  // eine RTCPeerConnection. Der Capture-Stream lebt beim Publisher weiter – beim
+  // Wechsel des Wand-Inhalts bauen wir nur die PeerConnection ab.
+  const RTC_CONFIG = { iceServers: [] }; // LAN: Host-Kandidaten genügen
+  let currentShare = null; // { sessionId, node, video, pcs: Map<peerId, RTCPeerConnection> }
+  let httpsPortPromise = null;
+
+  function getHttpsPort() {
+    if (!httpsPortPromise) {
+      httpsPortPromise = fetch('/api/config').then((r) => r.json())
+        .then((j) => j.httpsPort || null).catch(() => null);
+    }
+    return httpsPortPromise;
+  }
+  async function shareUrl(sessionId) {
+    // Bereits über HTTPS geladen → gleiche Origin nutzen. Sonst HTTPS-Port anhängen.
+    if (location.protocol === 'https:') return `${location.origin}/share?s=${sessionId}`;
+    const port = await getHttpsPort();
+    if (port) return `https://${location.hostname}:${port}/share?s=${sessionId}`;
+    return `${location.origin}/share?s=${sessionId}`; // Fallback (kein HTTPS verfügbar)
+  }
+
+  function rtcSend(obj) {
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'rtc', ...obj }));
+  }
+
+  function startShareReceiver(content, node, video) {
+    stopShareReceiver();
+    const sessionId = content.sessionId;
+    currentShare = { sessionId, node, video, pcs: new Map() };
+    rtcSend({ kind: 'join', session: sessionId, peerRole: 'viewer' });
+  }
+
+  function stopShareReceiver() {
+    if (!currentShare) return;
+    rtcSend({ kind: 'bye', session: currentShare.sessionId });
+    for (const pc of currentShare.pcs.values()) { try { pc.close(); } catch (_) {} }
+    currentShare = null;
+  }
+
+  // Verbindung nach WS-Reconnect erneuern: alte PCs verwerfen und neu beitreten.
+  function rejoinShare() {
+    if (!currentShare) return;
+    for (const pc of currentShare.pcs.values()) { try { pc.close(); } catch (_) {} }
+    currentShare.pcs.clear();
+    setShareLive(false);
+    rtcSend({ kind: 'join', session: currentShare.sessionId, peerRole: 'viewer' });
+  }
+
+  function setShareLive(live) {
+    if (currentShare && currentShare.node) currentShare.node.classList.toggle('live', !!live);
+  }
+
+  async function onRtcMessage(msg) {
+    if (!currentShare) return;
+    const from = msg.from;
+    if (msg.kind === 'offer') {
+      // Publisher startet die Verbindung. PC anlegen, Antwort senden.
+      let pc = currentShare.pcs.get(from);
+      if (pc) { try { pc.close(); } catch (_) {} }
+      pc = new RTCPeerConnection(RTC_CONFIG);
+      currentShare.pcs.set(from, pc);
+      pc.onicecandidate = (e) => {
+        if (e.candidate) rtcSend({ kind: 'ice', session: currentShare.sessionId, to: from, candidate: e.candidate });
+      };
+      pc.ontrack = (e) => {
+        if (currentShare && currentShare.video) {
+          currentShare.video.srcObject = e.streams[0];
+          currentShare.video.play().catch(() => {});
+          setShareLive(true);
+        }
+      };
+      pc.onconnectionstatechange = () => {
+        if (['failed', 'disconnected', 'closed'].includes(pc.connectionState)) {
+          if (currentShare && currentShare.pcs.get(from) === pc) {
+            currentShare.pcs.delete(from);
+            try { pc.close(); } catch (_) {}
+            if (currentShare.pcs.size === 0) setShareLive(false);
+          }
+        }
+      };
+      try {
+        await pc.setRemoteDescription(msg.sdp);
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        rtcSend({ kind: 'answer', session: currentShare.sessionId, to: from, sdp: pc.localDescription });
+      } catch (_) { /* ignorieren */ }
+    } else if (msg.kind === 'ice') {
+      const pc = currentShare.pcs.get(from);
+      if (pc && msg.candidate) { try { await pc.addIceCandidate(msg.candidate); } catch (_) {} }
+    } else if (msg.kind === 'bye') {
+      const pc = currentShare.pcs.get(from);
+      if (pc) { try { pc.close(); } catch (_) {} currentShare.pcs.delete(from); }
+      if (currentShare.pcs.size === 0) setShareLive(false);
+    }
+    // 'join'/'peers' brauchen wir als Viewer nicht – der Publisher initiiert.
+  }
+
   function scheduleAdvance(entry) {
     clearTimer();
     const c = entry.content;
+    // Bildschirmfreigabe hält, solange präsentiert wird – kein automatisches
+    // Weiterschalten (manuelles Weiterschalten/golive bleibt möglich).
+    if (c.type === 'screenshare') return;
     if (c.type === 'video' && c.videoMode !== 'duration') {
       if (current && current.videoEl) current.videoEl.onended = () => advance();
       advanceTimer = setTimeout(advance, (c.durationSec || 6) * 1000 + 600000); // Sicherheitsnetz

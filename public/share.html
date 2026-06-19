@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Bildschirm teilen · Screenwall</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: radial-gradient(circle at 50% 30%, #1c1c24 0%, #0a0a0d 75%);
+      color: #f3e6c4;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 24px; padding: 32px; text-align: center;
+    }
+    h1 { font-size: 1.6rem; margin: 0; font-weight: 600; }
+    p { color: #9aa0ac; margin: 0; max-width: 32rem; line-height: 1.5; }
+    button {
+      font-size: 1.1rem; font-weight: 600; padding: 16px 28px; border: 0; border-radius: 12px;
+      cursor: pointer; background: #f3e6c4; color: #1a1a1f; transition: opacity .15s;
+    }
+    button:hover { opacity: .9; }
+    button:disabled { opacity: .4; cursor: default; }
+    button.stop { background: #c0392b; color: #fff; }
+    #status { font-size: .95rem; min-height: 1.4em; }
+    .dot { display: inline-block; width: .7em; height: .7em; border-radius: 50%; background: #555; margin-right: .4em; vertical-align: middle; }
+    .dot.live { background: #2ecc71; }
+    .dot.connecting { background: #f1c40f; }
+    #preview { width: min(80vw, 480px); border-radius: 12px; background: #000; display: none; }
+    #preview.on { display: block; }
+    .hint { font-size: .85rem; color: #6b7280; }
+  </style>
+</head>
+<body>
+  <h1>Bildschirm auf die Wall teilen</h1>
+  <p id="intro">Tippe auf „Bildschirm teilen“ und wähle das Fenster oder den
+    ganzen Bildschirm aus. Das Bild erscheint dann auf der Wall. Du musst nur
+    einmal bestätigen – das Teilen läuft weiter, auch wenn die Wall
+    zwischendurch etwas anderes zeigt.</p>
+  <video id="preview" muted playsinline></video>
+  <div id="status"><span class="dot"></span>Bereit</div>
+  <button id="shareBtn">Bildschirm teilen</button>
+  <button id="stopBtn" class="stop" style="display:none">Teilen beenden</button>
+  <p class="hint" id="hint"></p>
+  <script src="/js/share.js"></script>
+</body>
+</html>
