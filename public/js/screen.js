@@ -586,21 +586,29 @@
   // Wechsel des Wand-Inhalts bauen wir nur die PeerConnection ab.
   const RTC_CONFIG = { iceServers: [] }; // LAN: Host-Kandidaten genügen
   let currentShare = null; // { sessionId, node, video, pcs: Map<peerId, RTCPeerConnection> }
-  let httpsPortPromise = null;
+  let configPromise = null;
 
-  function getHttpsPort() {
-    if (!httpsPortPromise) {
-      httpsPortPromise = fetch('/api/config').then((r) => r.json())
-        .then((j) => j.httpsPort || null).catch(() => null);
+  function getConfig() {
+    if (!configPromise) {
+      configPromise = fetch('/api/config').then((r) => r.json())
+        .catch(() => ({ httpsPort: null, lanHosts: [] }));
     }
-    return httpsPortPromise;
+    return configPromise;
   }
+  function isLocalHost(h) { return !h || h === 'localhost' || h === '127.0.0.1' || h === '::1'; }
+
   async function shareUrl(sessionId) {
-    // Bereits über HTTPS geladen → gleiche Origin nutzen. Sonst HTTPS-Port anhängen.
-    if (location.protocol === 'https:') return `${location.origin}/share?s=${sessionId}`;
-    const port = await getHttpsPort();
-    if (port) return `https://${location.hostname}:${port}/share?s=${sessionId}`;
-    return `${location.origin}/share?s=${sessionId}`; // Fallback (kein HTTPS verfügbar)
+    const cfg = await getConfig();
+    // Wird die Wall lokal angezeigt (localhost-Kiosk auf dem Server), ist der
+    // Browser-Host für entfernte Geräte unbrauchbar → die vom Server gemeldete
+    // LAN-IP verwenden. Sonst den Host nehmen, über den die Wall geöffnet wurde.
+    let host = location.hostname;
+    if (isLocalHost(host) && cfg.lanHosts && cfg.lanHosts.length) host = cfg.lanHosts[0];
+    if (location.protocol === 'https:' && !isLocalHost(location.hostname)) {
+      return `${location.origin}/share?s=${sessionId}`;
+    }
+    if (cfg.httpsPort) return `https://${host}:${cfg.httpsPort}/share?s=${sessionId}`;
+    return `${location.protocol}//${host}:${location.port || 80}/share?s=${sessionId}`; // Fallback (kein HTTPS)
   }
 
   function rtcSend(obj) {

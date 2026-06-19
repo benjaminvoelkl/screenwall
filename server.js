@@ -1531,7 +1531,12 @@ app.post('/api/overlay/:id/element/from-library/:libId', (req, res) => {
 // Laufzeit-Konfiguration für die Clients (die Wand ist über HTTP geladen und
 // muss den HTTPS-Port für die Share-URL kennen).
 app.get('/api/config', (req, res) => {
-  res.json({ httpsPort: httpsServer ? Number(HTTPS_PORT) : null });
+  res.json({
+    httpsPort: httpsServer ? Number(HTTPS_PORT) : null,
+    // LAN-IP(s), damit die Wand auch im localhost-Kiosk einen für entfernte
+    // Geräte erreichbaren Teil-Link bauen kann.
+    lanHosts: lanAddresses()
+  });
 });
 
 app.get('/api/qr', async (req, res) => {
