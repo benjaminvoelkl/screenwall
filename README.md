@@ -20,10 +20,10 @@ per WebSocket. (`/settings` leitet aus Kompatibilität auf `/programm` um.)
 Das Inhaltsmodell ist hierarchisch:
 
 - **Content** – der Hintergrund einer Übertragung, immer in eine Playlist gekapselt.
-  Typen: **Farbe**, **Bild**, **Video**, **YouTube**, **Webseite** (sowie der
-  vorbereitete, noch nicht aktive Typ **Bildschirm**/Screenshare). Je Content sind
-  Anzeigedauer, Stummschaltung, Zuschnitt (Cover) bzw. Farbe einstellbar; Bilder
-  haben optional einen 18:16-Zuschnitt (= 9:8) beim Upload.
+  Typen: **Farbe**, **Bild**, **Video**, **YouTube**, **Webseite**, **Bildschirm**
+  (Screenshare) sowie **Externer Inhalt** (nativer Vollbild-Browser für DRM-Streaming,
+  siehe unten). Je Content sind Anzeigedauer, Stummschaltung, Zuschnitt (Cover) bzw.
+  Farbe einstellbar; Bilder haben optional einen 18:16-Zuschnitt (= 9:8) beim Upload.
 - **Playlist** – eine geordnete Liste von Einträgen; ein Eintrag ist entweder ein
   Content **oder** eine Referenz auf eine andere Playlist (Verschachtelung; wird
   inline abgespielt). Jede Playlist hat eine Nachfolge-Aktion: **Loop** (von vorn),
@@ -102,6 +102,27 @@ Diese Standardannahmen sind im Code kommentiert und leicht änderbar:
 - **Internet nötig** nur für: YouTube/Webseiten-Contents sowie die per CDN geladene
   Crop-Bibliothek (Cropper.js). Farb-, Bild-, Video- und Overlay-Inhalte
   funktionieren vollständig offline.
+
+## Externer Inhalt / Streaming-Dienste (Netflix, ZDF-Livestream …)
+
+Streaming-Dienste lassen sich **nicht einbetten** (DRM bzw. `X-Frame-Options`, z.B.
+Netflix/Disney+/Prime) und **nicht per Screenshare** zeigen (DRM-Capture wird schwarz).
+Der Content-Typ **Externer Inhalt** löst das, indem die URL als **nativer Vollbild-
+Browser** (Chrome/Chromium) direkt auf dem **Anzeige-PC** geöffnet wird – er legt sich
+über die Wand und schließt beim Blockwechsel wieder.
+
+- **Voraussetzung:** Der Server läuft auf **demselben PC** wie die `/screen`-Anzeige.
+  Auf anderen Geräten zeigt der Block nur einen schwarzen Halte-Hintergrund.
+- **DRM ≠ Anmeldung:** Chrome spielt DRM (Widevine) automatisch ab. **Freie Streams**
+  (z.B. **ZDF-/ARD-Livestream**) laufen **ohne Anmeldung** sofort. **Bezahldienste**
+  erfordern eine **einmalige Anmeldung direkt am PC** (bleibt im persistenten Profil
+  `.chrome-external/` gespeichert).
+- **Kein Casten vom Handy:** Eine Anmeldung/Sitzung vom Handy kann **nicht** auf die
+  Wall übertragen werden – das wäre Google Cast und bräuchte echte Chromecast-Hardware.
+  Das Handy startet nur den Block in Screenwall; der Login lebt auf dem PC.
+- **Optionen:** Browser per Umgebungsvariable `CHROME_BIN` wählbar. Netflix auf
+  Linux-Chrome ist DRM-bedingt meist auf 720p begrenzt. Der Block schaltet nach der
+  eingestellten Dauer weiter (oder beim manuellen Go-Live auf anderen Inhalt).
 
 ## Projektstruktur
 

@@ -51,9 +51,13 @@ Basis-URL: `http://<host>:3000`. Antworten sind JSON.
 { "type":"youtube","videoId":"…", "videoMode":"end", "muted":false }
 { "type":"webpage","url":"https://…", "durationSec":15 }
 { "type":"screenshare", "withAudio":false }   // Wand zeigt Link+QR zum Teilen
+{ "type":"external", "url":"https://…", "name":"Netflix", "durationSec":15 } // nativer Vollbild-Browser auf dem Anzeige-PC (DRM-Streaming)
 ```
 YouTube: Es gibt **keinen** Such-Endpunkt – wähle selbst eine `videoId`.
 Bildschirmfreigabe: keine Quelle angeben; die Wand zeigt automatisch Link + QR.
+Externer Inhalt: für DRM-Streaming (Netflix/Disney+) oder freie Streams (ZDF-Live),
+die sich nicht einbetten lassen. Öffnet nativ auf dem Anzeige-PC; Bezahldienste
+brauchen eine einmalige Anmeldung am PC (nicht per Handy castbar).
 
 ## Kapitel & Highlights
 

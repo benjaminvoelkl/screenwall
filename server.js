@@ -27,7 +27,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join, extname } from 'path';
 import { randomUUID } from 'crypto';
 import { networkInterfaces } from 'os';
-import { execFile, execFileSync } from 'child_process';
+import { execFile, execFileSync, spawn } from 'child_process';
 import QRCode from 'qrcode';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -48,6 +48,11 @@ const PUBLIC_DIR = join(__dirname, 'public');
 
 // Audio-Ziel für die Lautstärkesteuerung (PipeWire/WirePlumber via wpctl).
 const AUDIO_SINK = process.env.AUDIO_SINK || '@DEFAULT_AUDIO_SINK@';
+
+// External-Content: nativer Vollbild-Browser auf dem Anzeige-PC (z.B. für DRM-
+// Streaming wie Netflix, das sich weder einbetten noch per Screenshare abgreifen
+// lässt). Eigenes, persistentes Profil → Login (Netflix & Co.) bleibt erhalten.
+const CHROME_PROFILE_DIR = join(__dirname, '.chrome-external');
 
 if (!existsSync(UPLOAD_DIR)) mkdirSync(UPLOAD_DIR, { recursive: true });
 if (!existsSync(THUMB_DIR)) mkdirSync(THUMB_DIR, { recursive: true });
@@ -78,7 +83,7 @@ function loadOrCreateCert() {
 // ---------------------------------------------------------------------------
 // Zustands-Modell
 // ---------------------------------------------------------------------------
-const CONTENT_TYPES = ['color', 'image', 'video', 'youtube', 'webpage', 'screenshare'];
+const CONTENT_TYPES = ['color', 'image', 'video', 'youtube', 'webpage', 'screenshare', 'external'];
 // Overlay-Elementtypen (liegen ÜBER dem Content; frei auf dem Ausgabe-Canvas platziert).
 const ELEMENT_TYPES = ['text', 'image', 'qr', 'shape'];
 
@@ -102,7 +107,7 @@ const newId = () => randomUUID();
 
 // ---- Content / Item / Playlist normalisieren -------------------------------
 function defaultDuration(type) {
-  return (type === 'webpage' || type === 'screenshare') ? 15 : 6;
+  return (type === 'webpage' || type === 'screenshare' || type === 'external') ? 15 : 6;
 }
 
 // Einen Content säubern/normalisieren. Behält nur die für den Typ relevanten Felder.
@@ -114,7 +119,7 @@ function normalizeContent(c) {
   if (type === 'color') out.color = typeof c.color === 'string' ? c.color : '#000000';
   if (type === 'image' || type === 'video') out.filename = typeof c.filename === 'string' ? c.filename : null;
   if (type === 'youtube') out.videoId = typeof c.videoId === 'string' ? c.videoId : null;
-  if (type === 'webpage' || type === 'screenshare') {
+  if (type === 'webpage' || type === 'screenshare' || type === 'external') {
     out.url = typeof c.url === 'string' ? c.url : '';
     if (type === 'webpage') {
       out.embeddable = typeof c.embeddable === 'boolean' ? c.embeddable : null;
@@ -128,7 +133,7 @@ function normalizeContent(c) {
       out.withAudio = !!c.withAudio;
     }
   }
-  // Anzeigedauer (für color/image/webpage/screenshare sowie video/youtube bei
+  // Anzeigedauer (für color/image/webpage/screenshare/external sowie video/youtube bei
   // videoMode==='duration').
   out.durationSec = (typeof c.durationSec === 'number' && c.durationSec > 0)
     ? c.durationSec : defaultDuration(type);
@@ -1253,6 +1258,52 @@ app.post('/api/volume', async (req, res) => {
   }
 });
 
+// --- External-Content: nativer Vollbild-Browser (Chrome) -------------------
+// Öffnet einen Streaming-Dienst (Netflix, ZDF-Livestream …) als eigenes Chrome-
+// Vollbildfenster auf dem Anzeige-PC. Das Fenster legt sich über die /screen-Wand;
+// beim Schließen (Blockwechsel/Programmende) erscheint /screen wieder. Funktioniert
+// nur, wenn der Server auf demselben PC läuft wie die Anzeige (siehe README).
+const CHROME_BINARIES = ['google-chrome-stable', 'google-chrome', 'chromium', 'chromium-browser'];
+function findChrome() {
+  if (process.env.CHROME_BIN) return process.env.CHROME_BIN;
+  for (const bin of CHROME_BINARIES) {
+    try { execFileSync('which', [bin], { stdio: 'ignore' }); return bin; } catch (_) {}
+  }
+  return null;
+}
+let externalChild = null; // laufender Chrome-Prozess (oder null)
+function closeExternal() {
+  if (externalChild) {
+    try { externalChild.kill('SIGTERM'); } catch (_) {}
+    externalChild = null;
+  }
+}
+function openExternal(url) {
+  const bin = findChrome();
+  if (!bin) throw new Error('Kein Chrome/Chromium gefunden (CHROME_BIN setzen?)');
+  closeExternal(); // immer nur ein externes Fenster gleichzeitig
+  const child = spawn(bin, [
+    `--user-data-dir=${CHROME_PROFILE_DIR}`,
+    '--no-first-run', '--no-default-browser-check',
+    '--new-window', '--start-fullscreen',
+    url
+  ], { stdio: 'ignore', detached: false });
+  child.on('error', (err) => { console.warn('  External-Browser:', err.message); });
+  child.on('exit', () => { if (externalChild === child) externalChild = null; });
+  externalChild = child;
+}
+
+app.post('/api/external/open', (req, res) => {
+  const url = (req.body?.url || '').trim();
+  if (!/^https?:\/\//i.test(url)) return res.status(400).json({ error: 'Ungültige URL' });
+  try { openExternal(url); res.json({ ok: true }); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+app.post('/api/external/close', (req, res) => {
+  closeExternal();
+  res.json({ ok: true });
+});
+
 // --- Upload (Bild/Video-Content) -------------------------------------------
 const storage = multer.diskStorage({
   destination: UPLOAD_DIR,
@@ -1916,4 +1967,9 @@ if (httpsServer) {
   httpsServer.listen(HTTPS_PORT, HOST, () => {
     console.log(`  HTTPS:      https://localhost:${HTTPS_PORT}/ (selbst-signiert)\n`);
   });
+}
+
+// Offenes External-Browserfenster beim Beenden mitschließen.
+for (const sig of ['exit', 'SIGINT', 'SIGTERM']) {
+  process.on(sig, () => { closeExternal(); if (sig !== 'exit') process.exit(0); });
 }

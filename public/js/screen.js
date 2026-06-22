@@ -430,6 +430,7 @@
   function clearStage() {
     clearTimer();
     stopShareReceiver();
+    closeExternalWindow();
     [slots[0], slots[1], els.ytLayer].forEach((L) => L.classList.remove('active'));
     slots.forEach((s) => { s.innerHTML = ''; });
     YT.pause();
@@ -453,6 +454,10 @@
     // Capture-Stream beim Publisher bleibt erhalten). buildNode startet bei einem
     // neuen Screenshare-Block den Empfang erneut.
     stopShareReceiver();
+    // Beim Wechsel auf Nicht-External-Content das native Fenster schließen. Bei
+    // External→External übernimmt der Open-Endpunkt das Ersetzen (vermeidet ein
+    // Wettrennen zwischen close und open).
+    if (c.type !== 'external') closeExternalWindow();
 
     if (c.type === 'youtube') {
       els.ytLayer.classList.toggle('crop', !!c.crop);
@@ -545,8 +550,30 @@
       node.appendChild(notice);
       // Empfang nur auf Wand/Monitor aufbauen – die Entwurf-Vorschau zeigt nur den Hinweis.
       if (!isPreview) startShareReceiver(c, node, v);
+    } else if (c.type === 'external') {
+      // Externer Inhalt (z.B. DRM-Streaming): wird als nativer Vollbild-Browser auf
+      // dem Anzeige-PC geöffnet (legt sich über die Wand). Hier nur ein neutraler
+      // Halte-Hintergrund mit Namen – sichtbar in Vorschau/Monitor und kurz beim
+      // Schließen des nativen Fensters.
+      node.classList.add('external');
+      node.appendChild(buildNotice(c.name || 'Externer Inhalt', ''));
+      if (viewer === 'wall') openExternalWindow(c.url);
     }
     return node;
+  }
+
+  // External-Content steuert ein natives Browserfenster auf dem Anzeige-PC. Nur die
+  // eigentliche Wand (viewer === 'wall') löst das aus; Monitor/Vorschau ignorieren es.
+  function openExternalWindow(url) {
+    if (viewer !== 'wall' || !url) return;
+    fetch('/api/external/open', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url })
+    }).catch(() => {});
+  }
+  function closeExternalWindow() {
+    if (viewer !== 'wall') return;
+    fetch('/api/external/close', { method: 'POST' }).catch(() => {});
   }
 
   // Beitritts-Hinweis für einen Screenshare-Block: Titel, Share-URL und QR-Code.

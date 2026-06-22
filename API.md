@@ -47,6 +47,7 @@ ermittle die **`videoId`** (der Teil nach `v=` in `youtube.com/watch?v=…`) und
 | `youtube` | `videoId`, `videoMode` (`end`\|`duration`), `durationSec`, `muted` |
 | `webpage` | `url`, `durationSec` |
 | `screenshare` | `withAudio` (bool, optional); `sessionId` wird automatisch vergeben |
+| `external` | `url`, `durationSec`, `name` (optional) |
 `name` ist überall optional. Bilder/Videos müssen vorher hochgeladen sein (`/api/upload`).
 
 **Bildschirmfreigabe (`screenshare`):** Überträgt einen entfernten Bildschirm per
@@ -58,6 +59,22 @@ Bild erscheint dann auf der Wand. `getDisplayMedia()` verlangt HTTPS, daher läu
 3443; einmalige Zertifikatswarnung). Der Block schaltet **nicht** automatisch
 weiter (hält, solange präsentiert wird). Einmal teilen genügt: Der Capture-Stream
 bleibt aktiv, auch wenn die Wand zwischendurch anderen Inhalt zeigt.
+
+**Externer Inhalt (`external`):** Für Inhalte, die sich **weder einbetten** (DRM /
+`X-Frame-Options`, z.B. Netflix/Disney+/Prime) **noch per Screenshare abgreifen**
+lassen (DRM-Capture wird schwarz). Statt im iframe wird die `url` als **nativer
+Vollbild-Browser** (Chrome/Chromium) direkt auf dem **Anzeige-PC** geöffnet (`POST
+/api/external/open`), legt sich über die Wand und schließt beim Blockwechsel/Programm-
+ende wieder (`POST /api/external/close`). Voraussetzungen & Grenzen:
+- Funktioniert **nur, wenn der Server auf demselben PC läuft wie die `/screen`-Anzeige**
+  (sonst zeigt der Block nur einen schwarzen Halte-Hintergrund mit Namen).
+- **DRM ≠ Login:** Chrome spielt DRM (Widevine) automatisch ab. Freie Streams ohne
+  Anmeldung (z.B. **ZDF-/ARD-Livestream**) laufen sofort; **Bezahldienste** erfordern
+  eine **einmalige Anmeldung am PC** (bleibt im persistenten Profil `.chrome-external`
+  gespeichert). Eine Handy-Anmeldung lässt sich **nicht** auf die Wand übertragen –
+  das wäre Casten und bräuchte echte Chromecast-Hardware.
+- Browser per `CHROME_BIN` wählbar; Netflix auf Linux-Chrome ist DRM-bedingt meist
+  auf 720p begrenzt. Der Block schaltet nach `durationSec` weiter.
 
 ---
 
@@ -280,12 +297,12 @@ für OpenAI `input_schema` → `parameters` umbenennen und in `{ "type":"functio
   },
   {
     "name": "create_playlist",
-    "description": "Playlist anlegen und optional mit Inhalten befüllen. POST /api/playlists. description = Kontext für spätere LLM-Auswahl. items[] sind content-Objekte (type: color|image|video|youtube|webpage|screenshare).",
+    "description": "Playlist anlegen und optional mit Inhalten befüllen. POST /api/playlists. description = Kontext für spätere LLM-Auswahl. items[] sind content-Objekte (type: color|image|video|youtube|webpage|screenshare|external).",
     "input_schema": { "type": "object", "properties": {
       "name": { "type": "string" }, "description": { "type": "string" },
       "items": { "type": "array", "items": { "type": "object",
         "properties": {
-          "type": { "type": "string", "enum": ["color","image","video","youtube","webpage","screenshare"] },
+          "type": { "type": "string", "enum": ["color","image","video","youtube","webpage","screenshare","external"] },
           "color": { "type": "string" }, "filename": { "type": "string" }, "videoId": { "type": "string" },
           "url": { "type": "string" }, "durationSec": { "type": "number" },
           "videoMode": { "type": "string", "enum": ["end","duration"] }, "name": { "type": "string" }

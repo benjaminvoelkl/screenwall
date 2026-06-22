@@ -124,6 +124,7 @@
   });
   $('pl-yt-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') addContentByType('youtube'); });
   $('pl-web-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') addContentByType('webpage'); });
+  $('pl-ext-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') addContentByType('external'); });
 
   async function addItem(item) {
     const pl = selPl();
@@ -150,6 +151,11 @@
     } else if (type === 'screenshare') {
       const withAudio = confirm('Ton der Freigabe mitübertragen?\n\nOK = mit Ton, Abbrechen = ohne Ton');
       await addItem({ kind: 'content', content: { type: 'screenshare', name: 'Bildschirm', withAudio, durationSec: 15 } });
+    } else if (type === 'external') {
+      const url = normalizeUrl($('pl-ext-input').value.trim());
+      if (!url) { alert('Bitte eine gültige URL eingeben.'); return; }
+      $('pl-ext-input').value = '';
+      await addItem({ kind: 'content', content: { type: 'external', url, name: 'Externer Inhalt', durationSec: 15 } });
     } else if (type === 'playlist') {
       const refId = $('pl-sub-select').value;
       if (!refId) { alert('Keine Playlist zum Einbetten ausgewählt.'); return; }
@@ -224,7 +230,7 @@
   // ===== Rendering ========================================================
   const TYPE_LABEL = {
     color: 'Farbe', image: 'Bild', video: 'Video',
-    youtube: 'YouTube', webpage: 'Webseite', screenshare: 'Bildschirm'
+    youtube: 'YouTube', webpage: 'Webseite', screenshare: 'Bildschirm', external: 'Externer Inhalt'
   };
 
   function render() {
@@ -348,7 +354,7 @@
 
   // ----- Storyboard (kompakte Mini-Timeline; Filmstreifen je Video) --------
   const NOMINAL_END = 30, THUMB_PX = 90, MAXF = 24;
-  const TYPE_BADGE = { color: '🎨', image: '🖼', video: '🎬', youtube: '▶', webpage: '🌐', screenshare: '🖥' };
+  const TYPE_BADGE = { color: '🎨', image: '🖼', video: '🎬', youtube: '▶', webpage: '🌐', screenshare: '🖥', external: '📺' };
   const measured = {}; // hier ungenutzt; Dauern kommen aus videoDuration (Server-Probe)
 
   function flatten(plId, byId, visited) {
@@ -517,7 +523,7 @@
     }
     const badge = document.createElement('span');
     badge.className = 'thumb type-badge';
-    badge.textContent = c.type === 'webpage' ? '🌐' : '🖥';
+    badge.textContent = TYPE_BADGE[c.type] || '🖥';
     return badge;
   }
 
@@ -529,7 +535,7 @@
 
     const name = document.createElement('div');
     name.className = 'name';
-    if (c.type === 'webpage') {
+    if (c.type === 'webpage' || c.type === 'external') {
       const a = document.createElement('a');
       a.href = c.url; a.target = '_blank'; a.rel = 'noopener'; a.textContent = c.url || '(URL)';
       name.appendChild(a);
@@ -593,6 +599,14 @@
         ? 'Link/QR erscheinen auf der Wall, sobald der Block live ist.'
         : 'Erst „Live schalten“, dann erscheint der Teil-Link auf der Wall.';
       ctrls.appendChild(hint);
+    } else if (c.type === 'external') {
+      ctrls.appendChild(field('Name', inputText(c.name || '', (v) => patchContent(item.id, { name: v }))));
+      ctrls.appendChild(field('URL', inputText(c.url || '', (v) => patchContent(item.id, { url: v }))));
+      ctrls.appendChild(field('Dauer (s)', inputNum(c.durationSec, 3, 6000, (v) => patchContent(item.id, { durationSec: v }))));
+      const hint = document.createElement('span');
+      hint.className = 'link-unknown';
+      hint.textContent = 'Öffnet als natives Vollbild-Fenster auf dem Anzeige-PC (Bezahldienste: dort einmalig anmelden).';
+      ctrls.appendChild(hint);
     }
 
     meta.appendChild(ctrls);
@@ -617,6 +631,12 @@
     const i = document.createElement('input');
     i.type = 'color'; i.value = value;
     i.addEventListener('change', () => onChange(i.value));
+    return i;
+  }
+  function inputText(value, onChange) {
+    const i = document.createElement('input');
+    i.type = 'text'; i.value = value || '';
+    i.addEventListener('change', () => onChange(i.value.trim()));
     return i;
   }
   function selectEl(options, value, onChange) {
