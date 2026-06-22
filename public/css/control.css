@@ -67,6 +67,17 @@ html, body {
 }
 .back-link:hover { color: var(--accent); }
 
+/* Neutraler Pill-Button für Kopfzeilen-Navigation (z.B. „Playlists"). */
+.nav-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 9px 18px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--panel-2);
+  color: var(--text); text-decoration: none;
+  font-size: 14px; font-weight: 700; letter-spacing: 0.04em;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+.nav-btn:hover { border-color: var(--accent); color: var(--accent); }
+
 /* Augen-Icon-Button (Vorschau): neutral, bei Hover grün. */
 .icon-btn {
   background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
