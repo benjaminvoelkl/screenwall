@@ -50,19 +50,26 @@
           <span class="tl-zoom-end">Detail</span>
           <input type="range" id="tl-zoom" min="0" max="100" step="1" value="100" />
           <span class="tl-zoom-end">Alles</span>
-          <button id="tl-fit" class="tl-tbtn" title="Komplette Timeline anzeigen">⤢ Alles</button>
         </span>
         <span class="tl-ov-add">
           <select id="tl-ov-pick" title="Vorhandenes Overlay"></select>
           <button id="tl-ov-addclip" class="tl-tbtn" title="Fenster des gewählten Overlays am Playhead einfügen">+ Fenster</button>
           <button id="tl-add-overlay" class="tl-tbtn" title="Neues Overlay anlegen + Fenster">✦ + Overlay</button>
         </span>
+        <span class="tl-chap-add">
+          <button id="tl-add-chapter" class="tl-tbtn" title="Kapitel am Playhead anlegen">📑 + Kapitel</button>
+          <button id="tl-add-highlight" class="tl-tbtn" title="Aktuelle Position als Highlight speichern">⭐ + Highlight</button>
+        </span>
         <span class="hint" style="margin:0">Spur anklicken/ziehen = scrubben.</span>
       </div>
+
+      <!-- Schnellzugriff: ein Chip je Kapitel der aktiven Playlist (Live-Sprung) -->
+      <div id="chapter-chips" class="chapter-chips"></div>
 
       <div id="tl-grid" class="tl-grid">
         <div class="tl-gutter">
           <div class="tl-gutter-ruler"></div>
+          <div class="tl-gutter-label"><span class="ic">📑</span> Kapitel</div>
           <div class="tl-gutter-label"><span class="ic">🎬</span> Content</div>
           <div class="tl-gutter-label"><span class="ic">🎵</span> Musik</div>
           <div id="ov-gutter"></div>
@@ -70,6 +77,7 @@
         <div class="tl-scroll" id="tl-scroll">
           <div class="tl-tracks" id="tl-tracks">
             <div class="tl-ruler" id="tl-ruler"></div>
+            <div class="tl-lane tl-lane-chapters" id="lane-chapters"></div>
             <div class="tl-lane" id="lane-content"></div>
             <div class="tl-lane empty" id="lane-music">Musik – folgt</div>
             <div id="ov-lanes"></div>
@@ -80,6 +88,15 @@
       <p id="prog-empty" class="prog-empty hidden">
         Noch kein Programm. Lege Inhalte unter <a href="/playlists">Playlists</a> an.
       </p>
+    </section>
+
+    <!-- Highlights: kuratierte, playlist-übergreifende Schnellzugriffe (Live-Sprung) -->
+    <section class="highlights-section" id="highlights-section">
+      <div class="highlights-head">
+        <h2>⭐ Highlights</h2>
+        <span class="hint" style="margin:0">Ein Klick springt sofort live dorthin.</span>
+      </div>
+      <div id="highlights-list" class="highlights-list"></div>
     </section>
   </main>
 
@@ -93,6 +110,12 @@
       <input type="range" id="vol-range" min="0" max="100" step="1" value="50" />
       <span id="vol-val" class="vol-val">–</span>
     </span>
+    <nav class="footer-docs">
+      <a href="/docs?d=benutzer" title="Benutzerhandbuch">📖 Handbuch</a>
+      <a href="/docs?d=api" title="API-Dokumentation">🔌 API</a>
+      <a href="/docs?d=entwickler" title="Entwickler & Deployment">🛠 Entwickler</a>
+      <a href="/docs?d=agents" title="Leitfaden für KI-Agenten">🤖 KI-Agenten</a>
+    </nav>
     <a class="screen-link" href="/screen" target="_blank">/screen öffnen ↗</a>
   </footer>
 

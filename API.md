@@ -47,6 +47,7 @@ ermittle die **`videoId`** (der Teil nach `v=` in `youtube.com/watch?v=…`) und
 | `youtube` | `videoId`, `videoMode` (`end`\|`duration`), `durationSec`, `muted` |
 | `webpage` | `url`, `durationSec` |
 | `screenshare` | `withAudio` (bool, optional); `sessionId` wird automatisch vergeben |
+| `external` | `url`, `durationSec`, `name` (optional) |
 `name` ist überall optional. Bilder/Videos müssen vorher hochgeladen sein (`/api/upload`).
 
 **Bildschirmfreigabe (`screenshare`):** Überträgt einen entfernten Bildschirm per
@@ -58,6 +59,22 @@ Bild erscheint dann auf der Wand. `getDisplayMedia()` verlangt HTTPS, daher läu
 3443; einmalige Zertifikatswarnung). Der Block schaltet **nicht** automatisch
 weiter (hält, solange präsentiert wird). Einmal teilen genügt: Der Capture-Stream
 bleibt aktiv, auch wenn die Wand zwischendurch anderen Inhalt zeigt.
+
+**Externer Inhalt (`external`):** Für Inhalte, die sich **weder einbetten** (DRM /
+`X-Frame-Options`, z.B. Netflix/Disney+/Prime) **noch per Screenshare abgreifen**
+lassen (DRM-Capture wird schwarz). Statt im iframe wird die `url` als **nativer
+Vollbild-Browser** (Chrome/Chromium) direkt auf dem **Anzeige-PC** geöffnet (`POST
+/api/external/open`), legt sich über die Wand und schließt beim Blockwechsel/Programm-
+ende wieder (`POST /api/external/close`). Voraussetzungen & Grenzen:
+- Funktioniert **nur, wenn der Server auf demselben PC läuft wie die `/screen`-Anzeige**
+  (sonst zeigt der Block nur einen schwarzen Halte-Hintergrund mit Namen).
+- **DRM ≠ Login:** Chrome spielt DRM (Widevine) automatisch ab. Freie Streams ohne
+  Anmeldung (z.B. **ZDF-/ARD-Livestream**) laufen sofort; **Bezahldienste** erfordern
+  eine **einmalige Anmeldung am PC** (bleibt im persistenten Profil `.chrome-external`
+  gespeichert). Eine Handy-Anmeldung lässt sich **nicht** auf die Wand übertragen –
+  das wäre Casten und bräuchte echte Chromecast-Hardware.
+- Browser per `CHROME_BIN` wählbar; Netflix auf Linux-Chrome ist DRM-bedingt meist
+  auf 720p begrenzt. Der Block schaltet nach `durationSec` weiter.
 
 ---
 
@@ -145,6 +162,31 @@ je Overlay möglich.
   `{ "start": 45, "duration": 8, "enabled": true }`
 - Entfernen: `DELETE /api/playlist/:playlistId/overlay-clips/:clipId`
 - ⚠️ **nur Entwurf** → danach `POST /api/golive`.
+
+### Kapitel & Highlights (schnell springen)
+**Kapitel** = benannte **Bereiche** (Start + Dauer) **innerhalb einer Playlist**, zum
+schnellen Anspringen. **Highlights** = eine **separate, kuratierte Liste**
+(playlist-übergreifend) mit eigener Reihenfolge als Schnellzugriff.
+
+Springen läuft über `POST /api/play` und veröffentlicht dabei sofort (kein
+`golive` nötig). Kapitel/Highlights selbst sind Struktur (Entwurf) und erscheinen
+strukturell erst nach `golive` – zum **Anspringen** reicht aber `play`.
+
+- **Kapitel-CRUD** (`start`/`duration` in Sekunden, `duration` weglassen/`null` = bis
+  zum nächsten Kapitel/Programmende; Kapitel sind nach `start` sortiert):
+  - `POST /api/playlist/:id/chapters` `{ "name":"Teil 2", "start":120, "duration":60, "color":"#4f8cff" }`
+  - `PATCH /api/playlist/:id/chapters/:chapterId` `{ "name":"…", "start":…, "duration":…, "color":"…" }`
+  - `DELETE /api/playlist/:id/chapters/:chapterId`
+  - Kapitel werden auch in `GET /api/playlists`, `GET /api/playlists/:id` und
+    `GET /api/status` (aktive Playlist) ausgegeben.
+- **Highlights-CRUD** (global):
+  - `GET /api/highlights` → `{ highlights:[{id,name,playlistId,start,duration,color}] }`
+  - `POST /api/highlights` `{ "name":"Höhepunkt", "playlistId":"<id>", "start":300 }`
+  - `PATCH /api/highlights/:id` · `DELETE /api/highlights/:id`
+  - `POST /api/highlights/order` `{ "order":[id,…] }` (Reihenfolge)
+- **Springen** (sofort live):
+  - Kapitel: `POST /api/play` `{ "playlistId":"<id>", "chapterId":"<cid>" }`
+  - Highlight: `POST /api/play` `{ "highlightId":"<hid>" }`
 
 ### Veröffentlichen (Entwurf → Wand)
 `POST /api/golive` Body `{}` – übernimmt den kompletten Entwurf auf die Wand. **Immer**
@@ -255,12 +297,12 @@ für OpenAI `input_schema` → `parameters` umbenennen und in `{ "type":"functio
   },
   {
     "name": "create_playlist",
-    "description": "Playlist anlegen und optional mit Inhalten befüllen. POST /api/playlists. description = Kontext für spätere LLM-Auswahl. items[] sind content-Objekte (type: color|image|video|youtube|webpage|screenshare).",
+    "description": "Playlist anlegen und optional mit Inhalten befüllen. POST /api/playlists. description = Kontext für spätere LLM-Auswahl. items[] sind content-Objekte (type: color|image|video|youtube|webpage|screenshare|external).",
     "input_schema": { "type": "object", "properties": {
       "name": { "type": "string" }, "description": { "type": "string" },
       "items": { "type": "array", "items": { "type": "object",
         "properties": {
-          "type": { "type": "string", "enum": ["color","image","video","youtube","webpage","screenshare"] },
+          "type": { "type": "string", "enum": ["color","image","video","youtube","webpage","screenshare","external"] },
           "color": { "type": "string" }, "filename": { "type": "string" }, "videoId": { "type": "string" },
           "url": { "type": "string" }, "durationSec": { "type": "number" },
           "videoMode": { "type": "string", "enum": ["end","duration"] }, "name": { "type": "string" }
@@ -380,4 +422,8 @@ Mapping Tool → HTTP (Pfadparameter aus den Argumenten, Rest als JSON-Body):
 `delete_element`→`DELETE /api/overlay/{overlayId}/element/{eid}` ·
 `remove_overlay_window`→`DELETE /api/playlist/{playlistId}/overlay-clips/{clipId}` ·
 `flash`→`POST /api/flash` · `flash_clear`→`POST /api/flash/clear` ·
-`set_playlist_meta`→`POST /api/playlist/{playlistId}/rename`.
+`set_playlist_meta`→`POST /api/playlist/{playlistId}/rename` ·
+`add_chapter`→`POST /api/playlist/{playlistId}/chapters` ·
+`jump_to_chapter`→`POST /api/play` (Body `{playlistId, chapterId}`) ·
+`list_highlights`→`GET /api/highlights` · `add_highlight`→`POST /api/highlights` ·
+`jump_to_highlight`→`POST /api/play` (Body `{highlightId}`).

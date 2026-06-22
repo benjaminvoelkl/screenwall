@@ -25,6 +25,15 @@
 .prog-clock { font-variant-numeric: tabular-nums; color: var(--text); }
 #prev-frame { width: 100%; height: 100%; border: 0; display: block; }
 
+/* Vorschau klebt beim Scrollen oben fest (Collapsing-Header; top wird per JS auf
+   die Topbar-Höhe gesetzt). */
+.prog-preview { position: sticky; z-index: 9; }
+/* Eckige Vorschau – Bild und roter Live-Rahmen ohne Radius. */
+.prog-preview .preview-stage, .prog-preview .preview-stage.live { border-radius: 0; }
+
+/* Ebenen-Icon der Overlay-Spur an die Gutter-Labelgröße anpassen. */
+.tl-gutter-label .ic svg { width: 16px; height: 16px; display: block; }
+
 /* Live-Hinweis: Badge oben links + roter Rahmen, wenn die Vorschau live ist. */
 .prog-live-badge {
   position: absolute; top: 8px; left: 8px; z-index: 3;
@@ -169,3 +178,58 @@ a.tl-title:hover { text-decoration: underline; color: var(--accent); }
 }
 
 .prog-empty { color: var(--muted); padding: 30px; text-align: center; }
+
+/* ===== Kapitel (Bereiche in der Timeline) ===== */
+.tl-chapter {
+  position: absolute; top: 8px; bottom: 8px; left: 0;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--chap-color, #4f8cff) 22%, transparent);
+  border: 1px solid color-mix(in srgb, var(--chap-color, #4f8cff) 70%, transparent);
+  display: flex; align-items: center; gap: 6px; padding: 0 8px;
+  color: var(--chap-color, #4f8cff); font-size: 12px; font-weight: 600;
+  cursor: grab; overflow: hidden;
+}
+.tl-chapter:active { cursor: grabbing; }
+.tl-chapter .tl-ov-handle:hover { background: color-mix(in srgb, var(--chap-color, #4f8cff) 55%, transparent); }
+
+/* Schnellzugriff-Chips (Live-Sprung zum Kapitel) */
+.chapter-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 4px; }
+.chapter-chips.hidden { display: none; }
+.chapter-chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+  border-radius: 999px; padding: 6px 12px; font-size: 13px; cursor: pointer;
+}
+.chapter-chip:hover { border-color: var(--chap-color, var(--accent)); }
+.chapter-chip .chip-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--chap-color, #4f8cff); flex: 0 0 auto; }
+.chapter-chip .chip-time { color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* ===== Highlights-Panel ===== */
+.highlights-section {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+  padding: 14px 16px 18px; margin-top: 16px;
+}
+.highlights-head { display: flex; align-items: baseline; gap: 16px; margin-bottom: 12px; }
+.highlights-head h2 { margin: 0; font-size: 16px; letter-spacing: 0.02em; }
+.highlights-list { display: flex; flex-wrap: wrap; gap: 12px; }
+.hl-card {
+  display: flex; align-items: stretch; border: 1px solid var(--border);
+  border-left: 4px solid var(--hl-color, #f6c453); border-radius: 10px; overflow: hidden;
+  background: var(--panel-2);
+}
+.hl-btn {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  background: transparent; border: 0; color: var(--text);
+  padding: 10px 14px; cursor: pointer; min-width: 120px; text-align: left;
+}
+.hl-btn:hover { background: rgba(255,255,255,0.05); }
+.hl-name { font-weight: 700; font-size: 14px; }
+.hl-meta { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.hl-ctrls { display: flex; flex-direction: column; border-left: 1px solid var(--border); }
+.hl-mini {
+  flex: 1 1 auto; background: transparent; border: 0; border-bottom: 1px solid var(--border);
+  color: var(--muted); cursor: pointer; font-size: 12px; padding: 2px 8px; line-height: 1.2;
+}
+.hl-mini:last-child { border-bottom: 0; }
+.hl-mini:hover:not(:disabled) { color: var(--text); background: rgba(255,255,255,0.05); }
+.hl-mini:disabled { opacity: 0.3; cursor: default; }

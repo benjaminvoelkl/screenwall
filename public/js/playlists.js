@@ -56,6 +56,13 @@
   }
   connect();
   fetch('/api/state').then((r) => r.json()).then((s) => { state = s; render(); });
+  // Übersicht bei Größenänderung neu zeichnen (Zeitleisten füllen die Breite neu).
+  let resizeTimer = null;
+  window.addEventListener('resize', () => {
+    if (detailMode) return;
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => { if (state) renderOverview(); }, 150);
+  });
   // Echte Video-/YouTube-Längen nachtragen, damit die Storyboard-Breiten stimmen.
   fetch('/api/probe-durations', { method: 'POST' }).catch(() => {});
 
@@ -117,6 +124,7 @@
   });
   $('pl-yt-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') addContentByType('youtube'); });
   $('pl-web-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') addContentByType('webpage'); });
+  $('pl-ext-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') addContentByType('external'); });
 
   async function addItem(item) {
     const pl = selPl();
@@ -143,6 +151,11 @@
     } else if (type === 'screenshare') {
       const withAudio = confirm('Ton der Freigabe mitübertragen?\n\nOK = mit Ton, Abbrechen = ohne Ton');
       await addItem({ kind: 'content', content: { type: 'screenshare', name: 'Bildschirm', withAudio, durationSec: 15 } });
+    } else if (type === 'external') {
+      const url = normalizeUrl($('pl-ext-input').value.trim());
+      if (!url) { alert('Bitte eine gültige URL eingeben.'); return; }
+      $('pl-ext-input').value = '';
+      await addItem({ kind: 'content', content: { type: 'external', url, name: 'Externer Inhalt', durationSec: 15 } });
     } else if (type === 'playlist') {
       const refId = $('pl-sub-select').value;
       if (!refId) { alert('Keine Playlist zum Einbetten ausgewählt.'); return; }
@@ -217,7 +230,7 @@
   // ===== Rendering ========================================================
   const TYPE_LABEL = {
     color: 'Farbe', image: 'Bild', video: 'Video',
-    youtube: 'YouTube', webpage: 'Webseite', screenshare: 'Bildschirm'
+    youtube: 'YouTube', webpage: 'Webseite', screenshare: 'Bildschirm', external: 'Externer Inhalt'
   };
 
   function render() {
@@ -274,10 +287,18 @@
     const pls = playlists();
     const cards = $('pl-cards');
     cards.innerHTML = '';
-    for (const pl of Object.values(pls.byId)) cards.appendChild(buildPlaylistCard(pl, pl.id === pls.rootId));
+    const avail = storyboardWidth();
+    for (const pl of Object.values(pls.byId)) cards.appendChild(buildPlaylistCard(pl, pl.id === pls.rootId, avail));
   }
 
-  function buildPlaylistCard(pl, active) {
+  // Innenbreite, die einer Storyboard-Zeitleiste zur Verfügung steht: Kartenbreite
+  // minus Karten-Padding (14*2) und Storyboard-Padding (6*2).
+  function storyboardWidth() {
+    const w = $('pl-cards').clientWidth || (window.innerWidth - 48);
+    return Math.max(160, w - 40);
+  }
+
+  function buildPlaylistCard(pl, active, avail) {
     const card = document.createElement('div');
     card.className = 'pl-card' + (active ? ' active' : '');
 
@@ -299,7 +320,9 @@
       card.appendChild(desc);
     }
 
-    card.appendChild(buildStoryboard(seq));
+    // px pro Sekunde, sodass die Playlist genau die Kartenbreite füllt.
+    const pps = total > 0 ? avail / total : 0;
+    card.appendChild(buildStoryboard(seq, pps));
 
     const acts = document.createElement('div');
     acts.className = 'pl-card-acts';
@@ -330,8 +353,8 @@
   }
 
   // ----- Storyboard (kompakte Mini-Timeline; Filmstreifen je Video) --------
-  const NOMINAL_END = 30, THUMB_PX = 90, MAXF = 24, SB_PPS = 1.2;
-  const TYPE_BADGE = { color: '🎨', image: '🖼', video: '🎬', youtube: '▶', webpage: '🌐', screenshare: '🖥' };
+  const NOMINAL_END = 30, THUMB_PX = 90, MAXF = 24;
+  const TYPE_BADGE = { color: '🎨', image: '🖼', video: '🎬', youtube: '▶', webpage: '🌐', screenshare: '🖥', external: '📺' };
   const measured = {}; // hier ungenutzt; Dauern kommen aus videoDuration (Server-Probe)
 
   function flatten(plId, byId, visited) {
@@ -350,15 +373,16 @@
     return Math.max(1, c.durationSec || 6);
   }
 
-  function buildStoryboard(seq) {
+  // Volle-Breite-Zeitleiste: Blockbreite proportional zur Dauer (pps = px/Sekunde,
+  // vom Aufrufer so gewählt, dass die ganze Playlist die Kartenbreite füllt).
+  function buildStoryboard(seq, pps) {
     const strip = document.createElement('div');
     strip.className = 'pl-storyboard';
     if (!seq.length) { strip.classList.add('empty'); strip.textContent = 'Noch keine Inhalte'; return strip; }
     for (const e of seq) {
       const c = e.content;
       const dur = blockDur(e.itemId, c);
-      const w = Math.round(Math.max(64, Math.min(480, dur * SB_PPS)));
-      const pps = w / Math.max(0.5, dur);
+      const w = Math.max(2, dur * pps);
       const block = document.createElement('div');
       block.className = 'pl-sb-block type-' + c.type;
       block.style.width = w + 'px';
@@ -371,6 +395,14 @@
       } else if (c.type === 'video' && c.filename) block.appendChild(buildFilmstrip(c.filename, dur, pps));
       const badge = document.createElement('span'); badge.className = 'pl-sb-badge'; badge.textContent = TYPE_BADGE[c.type] || '•';
       block.appendChild(badge);
+      // Name + Dauer (wie im Scrubboard) – nur zeigen, wenn der Block breit genug ist.
+      if (w >= 48) {
+        const label = document.createElement('div');
+        label.className = 'pl-sb-label';
+        const name = c.name || TYPE_LABEL[c.type] || c.type;
+        label.innerHTML = `${escapeHtml(name)} <span class="pl-sb-dur">${fmtClock(dur)}</span>`;
+        block.appendChild(label);
+      }
       strip.appendChild(block);
     }
     return strip;
@@ -491,7 +523,7 @@
     }
     const badge = document.createElement('span');
     badge.className = 'thumb type-badge';
-    badge.textContent = c.type === 'webpage' ? '🌐' : '🖥';
+    badge.textContent = TYPE_BADGE[c.type] || '🖥';
     return badge;
   }
 
@@ -503,7 +535,7 @@
 
     const name = document.createElement('div');
     name.className = 'name';
-    if (c.type === 'webpage') {
+    if (c.type === 'webpage' || c.type === 'external') {
       const a = document.createElement('a');
       a.href = c.url; a.target = '_blank'; a.rel = 'noopener'; a.textContent = c.url || '(URL)';
       name.appendChild(a);
@@ -567,6 +599,14 @@
         ? 'Link/QR erscheinen auf der Wall, sobald der Block live ist.'
         : 'Erst „Live schalten“, dann erscheint der Teil-Link auf der Wall.';
       ctrls.appendChild(hint);
+    } else if (c.type === 'external') {
+      ctrls.appendChild(field('Name', inputText(c.name || '', (v) => patchContent(item.id, { name: v }))));
+      ctrls.appendChild(field('URL', inputText(c.url || '', (v) => patchContent(item.id, { url: v }))));
+      ctrls.appendChild(field('Dauer (s)', inputNum(c.durationSec, 3, 6000, (v) => patchContent(item.id, { durationSec: v }))));
+      const hint = document.createElement('span');
+      hint.className = 'link-unknown';
+      hint.textContent = 'Öffnet als natives Vollbild-Fenster auf dem Anzeige-PC (Bezahldienste: dort einmalig anmelden).';
+      ctrls.appendChild(hint);
     }
 
     meta.appendChild(ctrls);
@@ -591,6 +631,12 @@
     const i = document.createElement('input');
     i.type = 'color'; i.value = value;
     i.addEventListener('change', () => onChange(i.value));
+    return i;
+  }
+  function inputText(value, onChange) {
+    const i = document.createElement('input');
+    i.type = 'text'; i.value = value || '';
+    i.addEventListener('change', () => onChange(i.value.trim()));
     return i;
   }
   function selectEl(options, value, onChange) {

@@ -4,3 +4,5 @@ uploads/*
 state.json
 live.json
 certs/
+.chrome-external/
+.thumbs/
