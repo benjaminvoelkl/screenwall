@@ -138,7 +138,7 @@
 
     const pls = state.playlists;
     const root = pls.byId[pls.rootId];
-    $('tl-title').textContent = root ? `Programm: ${root.name}` : 'Programm';
+    $('tl-title').textContent = root ? `Playlist: ${root.name}` : 'Playlist';
     seq = root ? flatten(pls.rootId, pls.byId, new Set()) : [];
 
     // 1) Dauern + Gesamtdauer (unabhängig vom Zoom).
