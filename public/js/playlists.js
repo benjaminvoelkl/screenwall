@@ -326,6 +326,15 @@
 
     const acts = document.createElement('div');
     acts.className = 'pl-card-acts';
+    // Sofort abspielen (nur für nicht-aktive Playlists): öffnet die Slide-to-Play-
+    // Bestätigung; bestätigt schaltet sie live (siehe openPlayConfirm).
+    if (!active) {
+      const play = document.createElement('button');
+      play.className = 'btn play'; play.textContent = '▶ Abspielen';
+      play.title = 'Diese Playlist sofort live auf die Wand schalten';
+      play.addEventListener('click', () => openPlayConfirm(pl));
+      acts.appendChild(play);
+    }
     const view = document.createElement('button');
     view.className = 'btn'; view.textContent = 'View more →';
     view.addEventListener('click', () => { location.href = '/playlists?edit=' + pl.id; });
@@ -771,4 +780,66 @@
     return String(s).replace(/[&<>"']/g, (c) =>
       ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
+
+  // ===== Slide-to-Play: Playlist sofort live abspielen ====================
+  // Bestätigungs-Dialog mit Schiebe-Geste (wie „Slide to go live" auf /programm).
+  // Bestätigt ruft /api/play auf -> Playlist wird Root und sofort veröffentlicht.
+  let playPlId = null;
+  function openPlayConfirm(pl) {
+    playPlId = pl.id;
+    $('play-pl-name').textContent = pl.name;
+    resetSlide();
+    $('play-modal').classList.remove('hidden');
+  }
+  function closePlayConfirm() {
+    $('play-modal').classList.add('hidden');
+    playPlId = null;
+  }
+  $('play-cancel').addEventListener('click', closePlayConfirm);
+  $('play-modal').addEventListener('click', (e) => { if (e.target === $('play-modal')) closePlayConfirm(); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !$('play-modal').classList.contains('hidden')) closePlayConfirm();
+  });
+
+  let slideX = 0, sliding = false, slideDone = false;
+  function slideTravel() { return $('play-slider').clientWidth - $('play-slide-handle').offsetWidth - 8; }
+  function setSlide(x) {
+    const max = slideTravel();
+    slideX = Math.max(0, Math.min(max, x));
+    $('play-slide-handle').style.transform = `translateX(${slideX}px)`;
+    $('play-slide-fill').style.width = `${slideX + $('play-slide-handle').offsetWidth}px`;
+  }
+  function resetSlide() {
+    slideDone = false; sliding = false;
+    $('play-slide-handle').style.transition = '';
+    setSlide(0);
+  }
+  async function firePlay() {
+    if (slideDone || !playPlId) return;
+    slideDone = true;
+    setSlide(slideTravel());
+    const id = playPlId;
+    await api('POST', '/api/play', { playlistId: id });
+    closePlayConfirm();
+  }
+  (function bindSlide() {
+    const handle = $('play-slide-handle');
+    let startX = 0, startSlide = 0;
+    handle.addEventListener('pointerdown', (e) => {
+      if (slideDone) return;
+      sliding = true; startX = e.clientX; startSlide = slideX;
+      handle.style.transition = 'none';
+      handle.setPointerCapture(e.pointerId);
+    });
+    handle.addEventListener('pointermove', (e) => { if (sliding) setSlide(startSlide + (e.clientX - startX)); });
+    const end = () => {
+      if (!sliding) return;
+      sliding = false;
+      handle.style.transition = 'transform 0.2s ease';
+      if (slideX >= slideTravel() * 0.95) firePlay();
+      else setSlide(0);
+    };
+    handle.addEventListener('pointerup', end);
+    handle.addEventListener('pointercancel', end);
+  })();
 })();

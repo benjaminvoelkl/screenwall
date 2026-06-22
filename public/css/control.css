@@ -213,6 +213,9 @@ textarea { resize: vertical; }
 }
 .btn:hover { background: var(--accent-2); }
 .btn.ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
+/* Grüner „Abspielen"-Button (Playlist sofort live schalten) – wie „Go Live". */
+.btn.play { background: #1f7a34; }
+.btn.play:hover { background: #248239; }
 
 .seq-bar { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
 .seq-bar select { min-width: 200px; }

@@ -128,6 +128,22 @@
     </div>
   </div>
 
+  <!-- Abspiel-Bestätigung: Playlist sofort live schalten (slide to play) -->
+  <div id="play-modal" class="modal hidden">
+    <div class="preview-box golive-box play-box">
+      <div class="preview-head">
+        <span>Playlist „<strong id="play-pl-name">…</strong>" sofort live abspielen?</span>
+        <button id="play-cancel" class="btn ghost">Abbrechen</button>
+      </div>
+      <p class="hint" style="margin:0">Ersetzt sofort den Inhalt auf der Wand und macht diese Playlist zur aktiven.</p>
+      <div id="play-slider" class="slide-confirm">
+        <div class="slide-fill" id="play-slide-fill"></div>
+        <span class="slide-label">Zum Abspielen schieben →</span>
+        <div class="slide-handle" id="play-slide-handle">▶</div>
+      </div>
+    </div>
+  </div>
+
   <!-- Sticky-Button: Willkommens-Overlay als eigene Seite -->
   <a class="overlay-fab" href="/overlay" title="Willkommens-Overlay bearbeiten">Overlay</a>
 
