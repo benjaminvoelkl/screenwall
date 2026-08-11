@@ -4,20 +4,20 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Screenwall – Programm</title>
+  <link rel="stylesheet" href="/css/base.css" />
   <link rel="stylesheet" href="/css/control.css" />
   <link rel="stylesheet" href="/css/programm.css" />
 </head>
 <body>
+  <!-- Kopfzeile: Marke + eine gemeinsame Hauptnavigation (UI.topbarNav) und rechts
+       die Entwurfs-Leiste, die zeigt, dass Änderungen noch nicht auf der Wand sind. -->
   <header class="topbar">
     <div class="topbar-title">
-      <a class="back-link" href="/" title="Zum Live-Monitor">← Live-Monitor</a>
-      <h1>Programm</h1>
+      <a class="brand" href="/">Screenwall</a>
+      <nav class="topnav" id="topnav"></nav>
     </div>
     <div class="topbar-actions">
-      <a class="nav-btn" href="/playlists" title="Playlists & Inhalte verwalten">Playlists</a>
-      <button id="go-live" class="go-live hidden" title="Entwurf ansehen und auf die Wand veröffentlichen">
-        Preview &amp; Go Live
-      </button>
+      <span id="draftbar"></span>
     </div>
   </header>
 
@@ -25,7 +25,8 @@
     <!-- Live-Vorschau des Entwurfs (folgt dem Playhead beim Scrubben) -->
     <section class="prog-preview">
       <div class="preview-head">
-        <span id="prog-mode">Live-Vorschau (Wand)</span>
+        <!-- Ein Statusindikator: das Badge auf der Bühne sagt, ob die Vorschau die
+             Wand spiegelt oder den Entwurf zeigt. Ein zweiter Text daneben entfiel. -->
         <span id="prog-clock" class="prog-clock">0:00 / 0:00</span>
       </div>
       <div id="prev-stage" class="preview-stage">
@@ -39,49 +40,65 @@
 
     <!-- Zeitstrahl mit parallelen Spuren -->
     <section class="timeline">
+      <!-- Werkzeugleiste in drei Gruppen: Wiedergabe | Ansicht | Einfügen.
+           Vorher lagen 11 gleichrangige Elemente in einer umbrechenden Zeile. -->
       <div class="tl-toolbar">
-        <button id="tl-live" class="tl-tbtn tl-live hidden" title="Zur Live-Ansicht (Wand spiegeln)">● Zur Live-Ansicht</button>
-        <span class="tl-transport" id="tl-transport">
-          <button id="tl-to-start" class="tl-tbtn" title="Zum Anfang">⏮</button>
-          <button id="tl-play" class="tl-tbtn" title="Pause (Leertaste)">⏸</button>
+        <span class="tl-group">
+          <button id="tl-live" class="tl-tbtn tl-live hidden" title="Zur Live-Ansicht (Wand spiegeln)">● Zur Live-Ansicht</button>
+          <span class="tl-transport" id="tl-transport">
+            <button id="tl-to-start" class="tl-tbtn" title="Zum Anfang" aria-label="Zum Anfang">⏮</button>
+            <button id="tl-play" class="tl-tbtn" title="Pause (Leertaste)" aria-label="Pause">⏸</button>
+          </span>
         </span>
-        <a class="tl-title" id="tl-title" href="/playlists" title="Playlists verwalten">Playlist</a>
-        <span id="tl-total">Gesamt: 0:00</span>
-        <span class="tl-zoom">Zoom
-          <span class="tl-zoom-end">Detail</span>
-          <input type="range" id="tl-zoom" min="0" max="100" step="1" value="100" />
-          <span class="tl-zoom-end">Alles</span>
+
+        <span class="tl-sep" aria-hidden="true"></span>
+
+        <span class="tl-group">
+          <span class="tl-title" id="tl-title">Playlist</span>
+          <span id="tl-total">Gesamt: 0:00</span>
+          <span class="tl-zoom">
+            <label for="tl-zoom">Zoom</label>
+            <span class="tl-zoom-end" aria-hidden="true">Detail</span>
+            <input type="range" id="tl-zoom" min="0" max="100" step="1" value="100" />
+            <span class="tl-zoom-end" aria-hidden="true">Alles</span>
+          </span>
         </span>
-        <span class="tl-ov-add">
-          <select id="tl-ov-pick" title="Vorhandenes Overlay"></select>
-          <button id="tl-ov-addclip" class="tl-tbtn" title="Fenster des gewählten Overlays am Playhead einfügen">+ Fenster</button>
-          <button id="tl-add-overlay" class="tl-tbtn" title="Neues Overlay anlegen + Fenster">✦ + Overlay</button>
-        </span>
-        <span class="tl-chap-add">
-          <button id="tl-add-chapter" class="tl-tbtn" title="Kapitel am Playhead anlegen">📑 + Kapitel</button>
-          <button id="tl-add-highlight" class="tl-tbtn" title="Aktuelle Position als Highlight speichern">⭐ + Highlight</button>
-        </span>
-        <span class="hint" style="margin:0">Spur anklicken/ziehen = scrubben.</span>
+
+        <span class="tl-sep" aria-hidden="true"></span>
+
+        <!-- Ein Einfügen-Menü statt vier Schaltflächen + Auswahlliste (UI.overflowMenu). -->
+        <span class="tl-group" id="tl-insert"></span>
       </div>
 
-      <!-- Schnellzugriff: ein Chip je Kapitel der aktiven Playlist (Live-Sprung) -->
-      <div id="chapter-chips" class="chapter-chips"></div>
+      <!-- Schnellzugriff: ein Chip je Kapitel der aktiven Playlist (Live-Sprung).
+           Chips schalten SOFORT live – Kapitel in der Spur scrubben nur die Vorschau. -->
+      <div id="chapter-chips" class="chapter-chips" aria-label="Kapitel live anspringen"></div>
+      <p class="tl-scrub-hint">Spur anklicken oder ziehen = Vorschau scrubben. Die Wand bleibt dabei unverändert.</p>
 
       <div id="tl-grid" class="tl-grid">
         <div class="tl-gutter">
           <div class="tl-gutter-ruler"></div>
           <div class="tl-gutter-label"><span class="ic">📑</span> Kapitel</div>
           <div class="tl-gutter-label"><span class="ic">🎬</span> Content</div>
-          <div class="tl-gutter-label"><span class="ic">🎵</span> Musik</div>
+          <div class="tl-gutter-label placeholder"><span class="ic" aria-hidden="true">🎵</span> Musik</div>
           <div id="ov-gutter"></div>
         </div>
         <div class="tl-scroll" id="tl-scroll">
           <div class="tl-tracks" id="tl-tracks">
             <div class="tl-ruler" id="tl-ruler"></div>
+            <!-- Statische Fortschrittslinie im oberen Lineal-Band: grau bis zum
+                 Scrubhead, rot bis zur echten Live-Position (läuft immer mit). -->
+            <div class="tl-progress" id="tl-progress">
+              <div class="tl-prog-fill scrub" id="tl-prog-scrub"></div>
+              <div class="tl-prog-fill live hidden" id="tl-prog-live"></div>
+            </div>
             <div class="tl-lane tl-lane-chapters" id="lane-chapters"></div>
             <div class="tl-lane" id="lane-content"></div>
-            <div class="tl-lane empty" id="lane-music">Musik – folgt</div>
+            <!-- Platzhalter, noch ohne Funktion: gedämpft und für Screenreader
+                 ausgeblendet, damit die Spur nicht als defekt gelesen wird. -->
+            <div class="tl-lane empty placeholder" id="lane-music" aria-hidden="true">Musik – geplant</div>
             <div id="ov-lanes"></div>
+            <div class="tl-livehead hidden" id="tl-livehead"></div>
             <div class="tl-playhead" id="tl-playhead"></div>
           </div>
         </div>
@@ -106,17 +123,13 @@
       <span id="conn-dot" class="dot"></span>
       <span id="conn-text">verbinde…</span>
     </span>
+    <!-- Lautstärke der Wand; die Dokumentation liegt in der Hauptnavigation ("Hilfe"). -->
     <span class="vol" title="Lautstärke der Wand (System)">
-      <button id="vol-mute" class="vol-icon" title="Stummschalten">🔊</button>
+      <label class="vol-label" for="vol-range">Wand-Lautstärke</label>
+      <button id="vol-mute" class="vol-icon" title="Stummschalten" aria-label="Stummschalten">🔊</button>
       <input type="range" id="vol-range" min="0" max="100" step="1" value="50" />
       <span id="vol-val" class="vol-val">–</span>
     </span>
-    <nav class="footer-docs">
-      <a href="/docs?d=benutzer" title="Benutzerhandbuch">📖 Handbuch</a>
-      <a href="/docs?d=api" title="API-Dokumentation">🔌 API</a>
-      <a href="/docs?d=entwickler" title="Entwickler & Deployment">🛠 Entwickler</a>
-      <a href="/docs?d=agents" title="Leitfaden für KI-Agenten">🤖 KI-Agenten</a>
-    </nav>
     <a class="screen-link" href="/screen" target="_blank">/screen öffnen ↗</a>
   </footer>
 
@@ -141,8 +154,8 @@
     </div>
   </div>
 
-  <a class="overlay-fab" href="/overlay" title="Willkommens-Overlay bearbeiten">Overlay</a>
-
+  <script src="/js/ui.js"></script>
+  <script src="/js/content.js"></script>
   <script src="/js/programm.js"></script>
 </body>
 </html>

@@ -4,17 +4,17 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Screenwall – Overlays</title>
-  <link rel="stylesheet" href="/css/control.css" />
+  <link rel="stylesheet" href="/css/base.css" />
   <link rel="stylesheet" href="/css/overlay.css" />
 </head>
 <body>
   <header class="topbar">
     <div class="topbar-title">
-      <a class="back-link" href="/programm" title="Zur Programm-Timeline">← Programm</a>
-      <h1>Overlays</h1>
+      <a class="brand" href="/">Screenwall</a>
+      <nav class="topnav" id="topnav"></nav>
     </div>
     <div class="topbar-actions">
-      <button id="go-live" class="go-live hidden" title="Entwurf auf die Wand veröffentlichen">● Go Live</button>
+      <span id="draftbar"></span>
     </div>
   </header>
 
@@ -65,6 +65,7 @@
   <!-- versteckter Datei-Input für Bild-Upload eines Elements -->
   <input type="file" id="el-image-input" accept="image/*" hidden />
 
+  <script src="/js/ui.js"></script>
   <script src="/js/overlay.js"></script>
 </body>
 </html>

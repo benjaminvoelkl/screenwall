@@ -1,5 +1,5 @@
-/* Programm-Timeline (/programm). Baut auf control.css auf (Topbar, Footer, Buttons,
-   Modal, Vorschau-Bühne, Slide-to-go-live) und ergänzt nur die Timeline-Optik. */
+/* Programm-Timeline (/programm). Baut auf base.css (Kopf-/Fußzeile, Buttons, Dialoge,
+   Slide-to-go-live) und control.css (Vorschau-Bühne) auf und ergänzt die Timeline-Optik. */
 
 .programm-main {
   padding: 16px 20px 28px;
@@ -21,7 +21,8 @@
   gap: 10px;
   align-items: center;
 }
-.prog-preview .preview-head { width: 100%; }
+/* Nur noch die Uhr im Kopf – der Vorschau-Zustand steht im Badge auf der Bühne. */
+.prog-preview .preview-head { width: 100%; justify-content: flex-end; }
 .prog-clock { font-variant-numeric: tabular-nums; color: var(--text); }
 #prev-frame { width: 100%; height: 100%; border: 0; display: block; }
 
@@ -56,27 +57,36 @@
   border-radius: 12px;
   padding: 14px 16px 18px;
 }
+/* Werkzeugleiste: drei Gruppen (Wiedergabe | Ansicht | Einfügen) mit Trennern,
+   statt elf gleichrangiger Elemente in einer umbrechenden Zeile. */
 .tl-toolbar {
-  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
-  margin-bottom: 12px; color: var(--muted); font-size: 14px;
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  margin-bottom: 10px; color: var(--muted); font-size: 14px;
 }
-.tl-toolbar .tl-title { color: var(--text); font-weight: 700; letter-spacing: 0.02em; text-decoration: none; cursor: pointer; }
-a.tl-title:hover { text-decoration: underline; color: var(--accent); }
-.tl-transport { display: flex; gap: 6px; margin-right: 4px; }
+.tl-group { display: inline-flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.tl-sep { width: 1px; height: 24px; background: var(--border); flex: 0 0 auto; }
+@media (max-width: 900px) { .tl-sep { display: none; } }
+
+.tl-toolbar .tl-title { color: var(--text); font-weight: 700; letter-spacing: 0.02em; }
+.tl-transport { display: flex; gap: 6px; }
 .tl-tbtn {
   background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
-  font-size: 15px; line-height: 1; padding: 7px 12px; border-radius: 8px; cursor: pointer;
+  font-size: 15px; line-height: 1; padding: 7px 12px; border-radius: var(--r-m);
+  cursor: pointer; min-height: 44px;      /* Touchfläche (Tablet/Handy) */
 }
+.tl-transport .tl-tbtn { min-width: 44px; }
 .tl-tbtn:hover { border-color: var(--accent); }
 .tl-tbtn.tl-live { color: #ff6b6b; border-color: #5a2a2a; }
-.tl-tbtn.tl-live:hover { border-color: #ff3b30; background: #241a1c; }
+.tl-tbtn.tl-live:hover { border-color: var(--live); background: #241a1c; }
 .tl-tbtn.hidden { display: none; }
+.tl-insert-btn { font-weight: 700; }
 .tl-zoom { display: flex; align-items: center; gap: 8px; }
+.tl-zoom label { flex-direction: row; }
 .tl-zoom input[type="range"] { width: 160px; accent-color: var(--accent); cursor: pointer; }
 .tl-zoom-end { font-size: 11px; color: var(--muted); letter-spacing: 0.02em; }
-.tl-zoom .tl-tbtn { padding: 5px 10px; font-size: 13px; }
-.tl-ov-add { display: inline-flex; gap: 6px; align-items: center; }
-.tl-ov-add select { background: var(--panel-2); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 6px 8px; font-size: 13px; max-width: 160px; }
+
+/* Hinweis zum Scrubben – eine ruhige Beschriftung unter den Kapitel-Chips. */
+.tl-scrub-hint { color: var(--muted); font-size: 12px; margin: 0 0 8px; }
 
 /* Gutter (Spurnamen) links fix, Spuren rechts horizontal scrollbar. */
 .tl-grid { display: flex; align-items: stretch; }
@@ -112,6 +122,9 @@ a.tl-title:hover { text-decoration: underline; color: var(--accent); }
   display: flex; align-items: center; justify-content: center;
   color: var(--muted); font-size: 13px; letter-spacing: 0.03em;
 }
+/* Noch nicht gebaute Spur: klar als Platzhalter gezeichnet, nicht als Defekt. */
+.tl-lane.placeholder, .tl-gutter-label.placeholder { opacity: 0.45; }
+.tl-lane.placeholder { background-image: repeating-linear-gradient(45deg, rgba(255,255,255,0.03) 0, rgba(255,255,255,0.03) 6px, transparent 6px, transparent 12px); }
 
 /* Content-Blöcke */
 .tl-block {
@@ -161,21 +174,46 @@ a.tl-title:hover { text-decoration: underline; color: var(--accent); }
 .tl-ov-clip.disabled { opacity: 0.45; }
 .tl-ov-clip:active { cursor: grabbing; }
 .tl-ov-label { flex: 1 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
-.tl-ov-eye { background: transparent; border: 0; color: inherit; cursor: pointer; font-size: 13px; padding: 0 2px; flex: 0 0 auto; }
+.tl-ov-eye {
+  background: transparent; border: 0; color: inherit; cursor: pointer;
+  font-size: 13px; padding: 4px 5px; flex: 0 0 auto; border-radius: 4px;
+}
+.tl-ov-eye:hover { background: rgba(255,255,255,0.14); }
+/* Live-Sprung am Kapitel: rot, weil er SOFORT auf die Wand wirkt. */
+.tl-ov-eye.live { color: var(--live); font-size: 12px; }
 .tl-ov-handle { position: absolute; top: 0; bottom: 0; width: 9px; cursor: ew-resize; z-index: 2; }
 .tl-ov-handle.l { left: 0; border-top-left-radius: 7px; border-bottom-left-radius: 7px; }
 .tl-ov-handle.r { right: 0; border-top-right-radius: 7px; border-bottom-right-radius: 7px; }
 .tl-ov-handle:hover { background: rgba(246,196,83,0.55); }
 
-/* Playhead */
+/* Playhead = Scrubhead: grau, solange er nicht der Live-Position entspricht. */
 .tl-playhead {
   position: absolute; top: 0; bottom: 0; left: 0; width: 2px;
-  background: #e51f25; z-index: 5; pointer-events: none;
+  background: #8a93a6; z-index: 5; pointer-events: none;
 }
 .tl-playhead::before {
   content: "▼"; position: absolute; top: -3px; left: 50%;
+  transform: translateX(-50%); color: #8a93a6; font-size: 12px;
+}
+
+/* Live-Marker: rot, läuft an der echten Wand-Position immer mit (auch im Entwurf).
+   Liegt über dem Scrubhead, sodass beide bei Deckung (Live-Modus) rot erscheinen. */
+.tl-livehead {
+  position: absolute; top: 0; bottom: 0; left: 0; width: 2px;
+  background: #e51f25; z-index: 6; pointer-events: none;
+}
+.tl-livehead::before {
+  content: "▼"; position: absolute; top: -3px; left: 50%;
   transform: translateX(-50%); color: #e51f25; font-size: 12px;
 }
+.tl-livehead.hidden { display: none; }
+
+/* Statische horizontale Fortschrittslinie im oberen Lineal-Band. */
+.tl-progress { position: absolute; top: 0; left: 0; right: 0; height: 26px; z-index: 4; pointer-events: none; }
+.tl-prog-fill { position: absolute; left: 0; bottom: 0; width: 0; height: 3px; border-radius: 0 2px 2px 0; }
+.tl-prog-fill.scrub { background: #8a93a6; z-index: 4; }
+.tl-prog-fill.live { background: #e51f25; z-index: 5; }
+.tl-prog-fill.hidden { display: none; }
 
 .prog-empty { color: var(--muted); padding: 30px; text-align: center; }
 
@@ -200,9 +238,16 @@ a.tl-title:hover { text-decoration: underline; color: var(--accent); }
   background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
   border-radius: 999px; padding: 6px 12px; font-size: 13px; cursor: pointer;
 }
+.chapter-chip { min-height: 44px; }  /* Touchfläche (Tablet/Handy) */
 .chapter-chip:hover { border-color: var(--chap-color, var(--accent)); }
 .chapter-chip .chip-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--chap-color, #4f8cff); flex: 0 0 auto; }
 .chapter-chip .chip-time { color: var(--muted); font-variant-numeric: tabular-nums; }
+/* Sichtbares Zeichen, dass ein Chip-Klick sofort auf der Wand wirkt (anders als
+   ein Klick auf das Kapitel in der Spur, der nur die Vorschau scrubbt). */
+.chapter-chip .chip-live {
+  color: var(--live); font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
+  padding-left: 5px; border-left: 1px solid var(--border);
+}
 
 /* ===== Highlights-Panel ===== */
 .highlights-section {
@@ -212,24 +257,36 @@ a.tl-title:hover { text-decoration: underline; color: var(--accent); }
 .highlights-head { display: flex; align-items: baseline; gap: 16px; margin-bottom: 12px; }
 .highlights-head h2 { margin: 0; font-size: 16px; letter-spacing: 0.02em; }
 .highlights-list { display: flex; flex-wrap: wrap; gap: 12px; }
+/* overflow bleibt sichtbar, damit das ⋯-Menü nicht an der Kartenkante abgeschnitten
+   wird; die runden Ecken übernehmen deshalb die Kinder. */
 .hl-card {
   display: flex; align-items: stretch; border: 1px solid var(--border);
-  border-left: 4px solid var(--hl-color, #f6c453); border-radius: 10px; overflow: hidden;
+  border-left: 4px solid var(--hl-color, var(--start)); border-radius: 10px;
   background: var(--panel-2);
 }
 .hl-btn {
   display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
   background: transparent; border: 0; color: var(--text);
   padding: 10px 14px; cursor: pointer; min-width: 120px; text-align: left;
+  border-radius: 7px 0 0 7px;
 }
 .hl-btn:hover { background: rgba(255,255,255,0.05); }
 .hl-name { font-weight: 700; font-size: 14px; }
 .hl-meta { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.hl-ctrls { display: flex; flex-direction: column; border-left: 1px solid var(--border); }
-.hl-mini {
-  flex: 1 1 auto; background: transparent; border: 0; border-bottom: 1px solid var(--border);
-  color: var(--muted); cursor: pointer; font-size: 12px; padding: 2px 8px; line-height: 1.2;
+/* Reihenfolge bleibt sichtbar, Umbenennen/Löschen liegen im ⋯-Menü. */
+.hl-ctrls {
+  display: flex; flex-direction: column; border-left: 1px solid var(--border);
+  border-radius: 0 7px 7px 0; overflow: visible;
 }
-.hl-mini:last-child { border-bottom: 0; }
+.hl-ctrls > *:first-child { border-top-right-radius: 7px; }
+.hl-ctrls .menu-wrap { flex: 1 1 auto; }
+.hl-mini {
+  flex: 1 1 auto; width: 100%; background: transparent; border: 0; border-bottom: 1px solid var(--border);
+  color: var(--muted); cursor: pointer; font-size: 12px; padding: 2px 10px; line-height: 1.2;
+  /* Drei gestapelte Schaltflächen: 44 px breit, 36 px hoch – volle 44×44 würde die
+     Karten auf über 130 px Höhe treiben. */
+  min-width: 44px; min-height: 36px; border-radius: 0;
+}
+.hl-ctrls > *:last-child .hl-mini, .hl-ctrls > .hl-mini:last-child { border-bottom: 0; }
 .hl-mini:hover:not(:disabled) { color: var(--text); background: rgba(255,255,255,0.05); }
 .hl-mini:disabled { opacity: 0.3; cursor: default; }

@@ -4,8 +4,16 @@
 // Orientierungslinien. Änderungen landen im Entwurf; "Go Live" auf /programm.
 
 (() => {
-  const $ = (id) => document.getElementById(id);
+  const U = window.UI;
+  const { $, el, hr, textInput, textArea, numInput, checkboxInput, rangeInput, selectInput, btn } = U;
   const PREVIEW_W = 4320, PREVIEW_H = 3840;
+
+  // Beschriftetes Feld in Editor-Optik; die Bausteine selbst kommen aus ui.js.
+  const field = (label, input) => { const f = U.field(label, input); f.className = 'ed-field'; return f; };
+  const colorInput = (v, onChange) => {
+    const i = U.colorInput(v, onChange); i.className = 'ed-color'; return i;
+  };
+  const setIfNotFocused = U.setIfNotFocused;
 
   let state = null;
   let selOvId = new URLSearchParams(location.search).get('overlay');
@@ -15,12 +23,9 @@
   let lastSig = null;
 
   // ---- API ----------------------------------------------------------------
-  async function api(method, url, body) {
-    const opt = { method, headers: { 'Content-Type': 'application/json' } };
-    if (body !== undefined) opt.body = JSON.stringify(body);
-    const r = await fetch(url, opt);
-    return r.json().catch(() => ({}));
-  }
+  // Speichern quittiert sichtbar und meldet Serverfehler (vorher stillschweigend
+  // verschluckt: `return r.json().catch(() => ({}))`).
+  const api = (method, url, body) => U.save(method, url, body).catch(() => ({}));
   const overlays = () => (state && state.overlays) || [];
   const library = () => (state && state.library) || [];
   const selOverlay = () => overlays().find((o) => o.id === selOvId) || null;
@@ -31,28 +36,20 @@
     if (additive) { const i = selIds.indexOf(id); if (i >= 0) selIds.splice(i, 1); else selIds.push(id); }
     else selIds = id ? [id] : [];
   }
-  function setIfNotFocused(el, v) { if (el && document.activeElement !== el) { if (el.type === 'checkbox') el.checked = v; else el.value = v; } }
+  // ---- Navigation + Entwurfs-Leiste ---------------------------------------
+  U.topbarNav('overlay');
+  // Wie auf /playlists: die Leiste führt zur Programm-Timeline, wo mit Vorschau
+  // und Slide-Bestätigung veröffentlicht wird.
+  const draft = U.draftBar();
 
   // ---- WebSocket ----------------------------------------------------------
-  function connect() {
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const ws = new WebSocket(`${proto}://${location.host}/?role=control`);
-    ws.addEventListener('message', (ev) => {
-      try {
-        const msg = JSON.parse(ev.data);
-        if (msg.type === 'state') {
-          state = msg.state;
-          if (typeof msg.dirty === 'boolean') $('go-live').classList.toggle('hidden', !msg.dirty);
-          render();
-        }
-      } catch (_) {}
-    });
-    ws.addEventListener('close', () => setTimeout(connect, 1500));
-    ws.addEventListener('error', () => ws.close());
-  }
-  connect();
-  fetch('/api/state').then((r) => r.json()).then((s) => { state = s; render(); });
-  $('go-live').addEventListener('click', () => { location.href = '/programm'; });
+  U.connectState({
+    onDirty: (dirty) => draft.update({ dirty, show: dirty }),
+    onState: (s) => { state = s; render(); }
+  });
+  U.api('GET', '/api/state', undefined, { quiet: true })
+    .then((s) => { state = s; render(); })
+    .catch(() => {});
 
   // ---- Render-Steuerung ---------------------------------------------------
   function structSig() {
@@ -108,8 +105,16 @@
     const actions = el('div', 'ed-row'); actions.style.marginTop = '10px';
     actions.appendChild(btn('In den Vordergrund', 'tiny', () => moveZ(o.id, +1)));
     actions.appendChild(btn('Nach hinten', 'tiny ghost', () => moveZ(o.id, -1)));
-    actions.appendChild(btn('Löschen', 'tiny ghost', async () => {
-      if (confirm(`Overlay „${o.name}" löschen?`)) { await api('DELETE', `/api/overlay/${o.id}`); selOvId = null; selIds = []; }
+    actions.appendChild(btn('Löschen', 'tiny danger', async () => {
+      const ok = await U.confirmDialog({
+        title: 'Overlay löschen?',
+        text: `„${o.name}" wird mit allen ${o.elements.length} Elementen gelöscht. `
+          + 'Auch seine Anzeigefenster in den Playlists verschwinden damit.',
+        confirmLabel: 'Löschen', danger: true
+      });
+      if (!ok) return;
+      await api('DELETE', `/api/overlay/${o.id}`);
+      selOvId = null; selIds = [];
     }));
     box.appendChild(actions);
   }
@@ -205,8 +210,13 @@
       box.appendChild(hr());
       const info = el('div', 'ed-empty-hint'); info.textContent = `${sel.length} Elemente ausgewählt`;
       box.appendChild(info);
-      box.appendChild(btn('Auswahl löschen', 'tiny ghost', async () => {
-        if (!confirm(`${sel.length} Elemente löschen?`)) return;
+      box.appendChild(btn('Auswahl löschen', 'tiny danger', async () => {
+        const ok = await U.confirmDialog({
+          title: `${sel.length} Elemente löschen?`,
+          text: 'Die ausgewählten Elemente werden aus diesem Overlay entfernt.',
+          confirmLabel: 'Löschen', danger: true
+        });
+        if (!ok) return;
         const o = selOverlay(); if (!o) return;
         for (const e of sel) await api('DELETE', `/api/overlay/${o.id}/element/${e.id}`);
         selIds = [];
@@ -295,8 +305,16 @@
     box.appendChild(z);
 
     box.appendChild(hr());
-    box.appendChild(btn('Element löschen', 'tiny ghost', async () => {
-      const o = selOverlay(); if (o && confirm('Element löschen?')) { await api('DELETE', `/api/overlay/${o.id}/element/${e.id}`); selIds = []; }
+    box.appendChild(btn('Element löschen', 'tiny danger', async () => {
+      const o = selOverlay(); if (!o) return;
+      const ok = await U.confirmDialog({
+        title: 'Element löschen?',
+        text: `„${elementTitle(e)}" wird aus „${o.name}" entfernt.`,
+        confirmLabel: 'Löschen', danger: true
+      });
+      if (!ok) return;
+      await api('DELETE', `/api/overlay/${o.id}/element/${e.id}`);
+      selIds = [];
     }));
   }
 
@@ -545,7 +563,15 @@
         const arr = Array.isArray(created) ? created : (created ? [created] : []);
         if (arr.length) selIds = arr.map((c) => c.id);
       });
-      const del = btn('✕', 'tiny ghost', async (ev) => { ev.stopPropagation(); if (confirm(`Vorlage „${en.name}" löschen?`)) await api('DELETE', `/api/library/${en.id}`); });
+      const del = U.iconBtn('✕', `Vorlage „${en.name}" löschen`, 'btn tiny danger', async (ev) => {
+        ev.stopPropagation();
+        const ok = await U.confirmDialog({
+          title: 'Vorlage löschen?',
+          text: `„${en.name}" wird aus der Bibliothek entfernt. Bereits eingefügte Elemente bleiben erhalten.`,
+          confirmLabel: 'Löschen', danger: true
+        });
+        if (ok) await api('DELETE', `/api/library/${en.id}`);
+      });
       row.append(name, tag, ins, del);
       list.appendChild(row);
     });
@@ -553,39 +579,21 @@
   $('lib-save').addEventListener('click', async () => {
     const sel = selElements(); if (!sel.length) return;
     const strip = (e) => { const c = { ...e }; delete c.id; return c; };
-    if (sel.length === 1) {
-      const name = prompt('Name der Vorlage:', elementTitle(sel[0])); if (name == null) return;
-      await api('POST', '/api/library', { name, kind: 'element', element: strip(sel[0]) });
-    } else {
-      const name = prompt('Name der Gruppe:', `Gruppe (${sel.length})`); if (name == null) return;
-      await api('POST', '/api/library', { name, kind: 'group', elements: sel.map(strip) });
-    }
+    const single = sel.length === 1;
+    const res = await U.promptDialog({
+      title: single ? 'Element als Vorlage speichern' : `${sel.length} Elemente als Gruppe speichern`,
+      label: 'Name der Vorlage',
+      value: single ? elementTitle(sel[0]) : `Gruppe (${sel.length})`,
+      confirmLabel: 'Speichern'
+    });
+    if (!res) return;
+    const name = res.value || (single ? 'Vorlage' : `Gruppe (${sel.length})`);
+    if (single) await api('POST', '/api/library', { name, kind: 'element', element: strip(sel[0]) });
+    else await api('POST', '/api/library', { name, kind: 'group', elements: sel.map(strip) });
   });
 
-  // ---- kleine UI-Bausteine ------------------------------------------------
-  function el(tag, cls) { const n = document.createElement(tag); if (cls) n.className = cls; return n; }
-  function hr() { const h = el('div'); h.style.borderTop = '1px solid var(--border)'; h.style.margin = '10px 0'; return h; }
-  function field(label, input) { const f = el('label', 'ed-field'); f.appendChild(document.createTextNode(label)); f.appendChild(input); return f; }
-  function textInput(v, onChange) { const i = el('input'); i.type = 'text'; i.value = v || ''; i.addEventListener('change', () => onChange(i.value)); return i; }
-  function textArea(v, onChange) { const t = el('textarea'); t.rows = 2; t.value = v || ''; t.addEventListener('change', () => onChange(t.value)); return t; }
-  function numInput(v, min, max, step, onChange) {
-    const i = el('input'); i.type = 'number'; i.min = min; i.max = max; i.step = step; i.value = v;
-    i.addEventListener('change', () => { const n = i.value === '' ? 0 : Number(i.value); onChange(Math.max(min, Math.min(max, n))); });
-    return i;
-  }
-  function colorInput(v, onChange) { const i = el('input', 'ed-color'); i.type = 'color'; i.value = v; i.addEventListener('change', () => onChange(i.value)); return i; }
-  function checkboxInput(v, onChange) { const i = el('input'); i.type = 'checkbox'; i.checked = !!v; i.addEventListener('change', () => onChange(i.checked)); return i; }
-  function rangeInput(v, min, max, step, onChange) {
-    const i = el('input'); i.type = 'range'; i.min = min; i.max = max; i.step = step; i.value = v;
-    i.addEventListener('change', () => onChange(Number(i.value)));
-    return i;
-  }
-  function selectInput(opts, value, onChange) {
-    const s = el('select');
-    for (const [v, label] of opts) { const o = el('option'); o.value = v; o.textContent = label; s.appendChild(o); }
-    s.value = value; s.addEventListener('change', () => onChange(s.value));
-    return s;
-  }
-  function btn(label, cls, onClick) { const b = el('button', 'btn ' + (cls || '')); b.textContent = label; b.addEventListener('click', onClick); return b; }
+  // ---- kleine Helfer ------------------------------------------------------
+  // Die Formular-Bausteine (el/hr/field/textInput/…) liegen jetzt in ui.js und
+  // werden oben destrukturiert – sie waren hier und in playlists.js doppelt.
   function clamp01(v, size) { return Math.max(0, Math.min(1 - (size || 0), v)); }
 })();

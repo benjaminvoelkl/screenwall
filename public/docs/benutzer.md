@@ -23,8 +23,11 @@ Login, alle im selben Netzwerk können steuern.
 
 ## Grundbegriffe
 
-- **Content (Inhalt):** Ein Hintergrund-Element. Typen: **Farbe**, **Bild**,
-  **Video**, **YouTube**, **Webseite**, **Bildschirm teilen (Screenshare)**.
+- **Content (Inhalt):** Ein Hintergrund-Element. Typen: **Bild**, **Video**,
+  **YouTube**, **Webseite**, **Externer Inhalt** (Vollbild-Browser am Anzeige-PC,
+  für DRM-Dienste wie Netflix oder freie Livestreams), **Bildschirm teilen
+  (Screenshare)** und **Farbe**. Jeder Typ wird im Dialog „Inhalt hinzufügen"
+  mit einem Satz erklärt.
 - **Playlist:** Geordnete Liste von Inhalten. Eine Playlist kann andere Playlists
   enthalten (Verschachtelung). Am Ende: **Loop** (von vorn), **Stopp** (Standbild)
   oder **Nächste Playlist**.
@@ -46,14 +49,20 @@ Login, alle im selben Netzwerk können steuern.
 
 ## Erste Schritte
 
-1. **Playlist füllen** (`/playlists`): „+ Farbe", „+ Bild/Video" (Upload),
-   „+ YouTube", „+ Webseite", „+ Bildschirm teilen" oder „+ Playlist einbetten".
-   Reihenfolge per Drag & Drop, Dauer je Inhalt einstellbar.
-2. **(Optional) Overlay** (`/overlay`): Begrüßungstext, Logo oder QR-Code
+1. **Playlist anlegen** (`/playlists`): „+ Neue Playlist" fragt Name, Beschreibung
+   und das Verhalten am Ende in einem Dialog ab und öffnet dann die Playlist.
+2. **Playlist füllen:** „+ Inhalt hinzufügen" öffnet die Typ-Auswahl; danach
+   erscheinen nur die Felder, die der gewählte Typ braucht. Reihenfolge per
+   Drag & Drop, Dauer und Optionen je Eintrag direkt in der Liste.
+3. **(Optional) Overlay** (`/overlay`): Begrüßungstext, Logo oder QR-Code
    platzieren und als Fenster in der Playlist einblenden.
-3. **Vorschau & Go Live** (`/programm`): Am Zeitstrahl scrubben, dann
+4. **Vorschau & Go Live** (`/programm`): Am Zeitstrahl scrubben, dann
    **„Preview & Go Live"** – jetzt läuft es auf der Wand (`/screen`).
-4. **Wand öffnen** (`/screen`) auf dem Beamer/Monitor (Vollbild).
+5. **Wand öffnen** (`/screen`) auf dem Beamer/Monitor (Vollbild).
+
+> Gespeichert wird sofort bei jeder Änderung – eine kurze Meldung „Gespeichert"
+> bestätigt das. Solange oben „Entwurf – nicht veröffentlicht" steht, ist die
+> Änderung noch **nicht** auf der Wand; das erledigt erst **Preview & Go Live**.
 
 ---
 

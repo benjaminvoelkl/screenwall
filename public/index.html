@@ -4,16 +4,16 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Screenwall – Live-Monitor</title>
+  <link rel="stylesheet" href="/css/base.css" />
   <link rel="stylesheet" href="/css/monitor.css" />
 </head>
-<body>
-  <!-- Menü wie auf /programm: Marke (→ Home) links, Programm rechts -->
+<body class="monitor">
+  <!-- Dieselbe Kopfzeile und Navigation wie auf allen Steuer-Seiten. -->
   <header class="topbar">
-    <a class="brand" href="/">Screenwall</a>
-    <span class="topbar-right">
-      <a class="settings-link" href="/docs" title="Dokumentation / Hilfe">📖 Hilfe</a>
-      <a class="settings-link" href="/programm">⚙ Programm</a>
-    </span>
+    <div class="topbar-title">
+      <a class="brand" href="/">Screenwall</a>
+      <nav class="topnav" id="topnav"></nav>
+    </div>
   </header>
 
   <!-- Schmaler, mittiger On-Air-Streifen (klickbar: Sendung stoppen / fortsetzen) -->
@@ -22,22 +22,6 @@
     <span class="onair-label" id="onair-label">On Air</span>
     <span class="onair-hint" id="onair-hint">▾ stoppen</span>
   </button>
-
-  <!-- Stopp-Bestätigung: Slide-to-stop (verhindert versehentliches Stoppen) -->
-  <div id="stop-modal" class="modal hidden">
-    <div class="modal-box">
-      <h3>Sendung komplett stoppen?</h3>
-      <p class="modal-hint">Die Wand wird schwarz. „On Air" lässt sich nicht versehentlich
-        stoppen – zum Bestätigen den Regler ganz nach rechts schieben. Wieder auf Sendung
-        geht über „Go Live" oder erneut hier.</p>
-      <div id="stop-slider" class="slide-confirm">
-        <div class="slide-fill" id="stop-fill"></div>
-        <span class="slide-label">Zum Stoppen schieben →</span>
-        <div class="slide-handle" id="stop-handle">■</div>
-      </div>
-      <div class="modal-actions"><button id="stop-cancel" class="btn ghost">Abbrechen</button></div>
-    </div>
-  </div>
 
   <main class="monitor-main">
     <!-- 18:16-Live-Vorschau: zeigt, was gerade auf der Wand läuft -->
@@ -50,13 +34,15 @@
 
     <!-- TV-Lautstärke -->
     <div class="vol-bar">
-      <button id="vol-mute" class="vol-icon" title="Stummschalten">🔊</button>
-      <input type="range" id="vol-range" min="0" max="100" step="1" value="50" />
+      <button id="vol-mute" class="vol-icon" title="Stummschalten" aria-label="Stummschalten">🔊</button>
+      <input type="range" id="vol-range" min="0" max="100" step="1" value="50"
+             aria-label="Wand-Lautstärke" />
       <span id="vol-val" class="vol-val">–</span>
       <span class="vol-caption">TV-Lautstärke</span>
     </div>
   </main>
 
+  <script src="/js/ui.js"></script>
   <script src="/js/monitor.js"></script>
 </body>
 </html>

@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Screenwall – Dokumentation</title>
-  <link rel="stylesheet" href="/css/control.css" />
+  <link rel="stylesheet" href="/css/base.css" />
   <style>
     .docs-main { max-width: 920px; margin: 0 auto; padding: 16px 20px 60px; }
     .docs-nav { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 20px; }
@@ -32,11 +32,8 @@
 <body>
   <header class="topbar">
     <div class="topbar-title">
-      <a class="back-link" href="/" title="Zum Live-Monitor">← Live-Monitor</a>
-      <h1>Dokumentation</h1>
-    </div>
-    <div class="topbar-actions">
-      <a class="back-link" href="/programm">Programm →</a>
+      <a class="brand" href="/">Screenwall</a>
+      <nav class="topnav" id="topnav"></nav>
     </div>
   </header>
 
@@ -46,8 +43,10 @@
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="/js/ui.js"></script>
   <script>
     (() => {
+      window.UI.topbarNav('docs');
       const DOCS = [
         { key: 'benutzer',   title: '📖 Benutzerhandbuch', url: '/docs/benutzer.md' },
         { key: 'api',        title: '🔌 API',              url: '/API.md' },

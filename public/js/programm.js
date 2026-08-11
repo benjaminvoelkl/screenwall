@@ -3,9 +3,13 @@
 // Musik (Platzhalter) und Overlay. Scrubben am Zeitstrahl steuert per WebSocket
 // die eingebettete /screen-Vorschau (cmd:'goto'); "Preview & Go Live" startet die
 // Vorschau ab dem Playhead-Punkt und veröffentlicht den Entwurf.
+//
+// Gemeinsame Bausteine kommen aus ui.js (UI.*) und content.js (CT.*): Dialoge statt
+// prompt/confirm, Toasts statt stillem Speichern, ein Content-Typ-Register.
 
 (() => {
-  const $ = (id) => document.getElementById(id);
+  const { $, fmtClock } = window.UI;
+  const U = window.UI;
 
   let state = null;
   let liveNowPlaying = null;          // Was läuft gerade live auf der Wand?
@@ -18,45 +22,32 @@
   let liveProg = { t: 0, ts: 0 };     // letzter Programmzeit-Stand der Wand (für Live-Playhead)
   const measured = {};                // itemId -> gemessene Dauer (für "bis Ende"-Videos)
 
-  const NOMINAL_END = 30;            // angenommene Dauer für Videos ohne feste Dauer
-  const RULER_H = 26;
+  // ---- Navigation, Entwurfs-Leiste, Lautstärke (gemeinsame Bausteine) -----
+  U.topbarNav('programm');
+  U.bindVolume();
+  // Auf dieser Seite liegt die Veröffentlichungs-Vorschau selbst – die Leiste
+  // öffnet daher direkt das Go-Live-Modal statt zu navigieren.
+  const draft = U.draftBar({ onPublish: () => openGoLive() });
 
   // ---- API/WS -------------------------------------------------------------
-  let ws = null;
-  function connect() {
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    ws = new WebSocket(`${proto}://${location.host}/?role=control`);
-    ws.addEventListener('open', () => setConn(true));
-    ws.addEventListener('message', (ev) => {
-      try {
-        const msg = JSON.parse(ev.data);
-        if (msg.type === 'state') {
-          state = msg.state;
-          if (typeof msg.dirty === 'boolean') setDirty(msg.dirty);
-          render();
-        } else if (msg.type === 'cmd' && msg.cmd === 'nowplaying') {
-          liveNowPlaying = msg;
-          if (typeof msg.progTime === 'number') liveProg = { t: msg.progTime, ts: performance.now() };
-          applyLiveNow();
-        }
-      } catch (_) {}
-    });
-    ws.addEventListener('close', () => { setConn(false); setTimeout(connect, 1500); });
-    ws.addEventListener('error', () => ws.close());
-  }
-  function setConn(on) {
-    $('conn-dot').classList.toggle('on', on);
-    $('conn-text').textContent = on ? 'verbunden' : 'getrennt – verbinde neu…';
-  }
-  function wsSend(obj) {
-    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
-  }
-  connect();
-  fetch('/api/state').then((r) => r.json()).then((s) => { state = s; render(); });
+  const conn = U.connectState({
+    onConn: U.bindConnDot(),
+    onDirty: (dirty) => setDirty(dirty),
+    onState: (s) => { state = s; render(); },
+    onCmd: (msg) => {
+      if (msg.cmd !== 'nowplaying') return;
+      liveNowPlaying = msg;
+      if (typeof msg.progTime === 'number') liveProg = { t: msg.progTime, ts: performance.now() };
+      applyLiveNow();
+      updateLiveMarker();
+    }
+  });
+  const wsSend = (obj) => conn.send(obj);
+  U.api('GET', '/api/state', undefined, { quiet: true }).then((s) => { state = s; render(); }).catch(() => {});
   // Echte Video-/YouTube-Längen serverseitig nachtragen, damit die Timeline korrekt
   // layoutet (ohne sie laufen ~30 s Nominaldauer pro Block). Der folgende state-
   // Broadcast rendert die Timeline mit den echten Dauern neu.
-  fetch('/api/probe-durations', { method: 'POST' }).catch(() => {});
+  U.api('POST', '/api/probe-durations', undefined, { quiet: true }).catch(() => {});
 
   // ---- Vorschau-Modus: Live-Spiegel (Wand) <-> Entwurf-Vorschau -----------
   // Standard = Live-Spiegel (Sicht 'monitor', /screen?view=live): zeigt die echte
@@ -89,30 +80,13 @@
     if (!scrubbing && !d.paused) { playheadT = Math.min(total, b.start + t); positionPlayhead(); }
   });
 
-  // ===== Ausflachen (Quelle: screen.js:flatten – bewusst gespiegelt) ========
-  function flatten(plId, byId, visited) {
-    const pl = byId[plId];
-    if (!pl || visited.has(plId)) return [];
-    const v = new Set(visited); v.add(plId);
-    const out = [];
-    for (const it of pl.items) {
-      if (it.kind === 'content') out.push({ itemId: it.id, content: it.content });
-      else if (it.kind === 'playlist') out.push(...flatten(it.refId, byId, v));
-    }
-    return out;
-  }
-
-  function blockDur(itemId, c) {
-    if ((c.type === 'video' || c.type === 'youtube') && c.videoMode !== 'duration') {
-      // Echte (vom Server geprobte) Länge bevorzugen – stabil, kein Re-Layout beim
-      // Scrubben. Live-Messung nur als Fallback, falls keine Länge bekannt ist.
-      return c.videoDuration || measured[itemId] || NOMINAL_END;
-    }
-    return Math.max(1, c.durationSec || 6);
-  }
+  // ===== Ausflachen / Dauern (aus content.js – identisch mit /playlists) ====
+  const flatten = (plId, byId, visited) => window.CT.flatten(plId, byId, visited);
+  // Echte (vom Server geprobte) Länge bevorzugen – stabil, kein Re-Layout beim
+  // Scrubben. `measured` ist nur die Rückfallebene aus der Live-Messung.
+  const blockDur = (itemId, c) => window.CT.blockDur(itemId, c, measured);
 
   // ===== Rendering =========================================================
-  const TYPE_BADGE = { color: '🎨', image: '🖼', video: '🎬', youtube: '▶', webpage: '🌐', screenshare: '🖥', external: '📺' };
   // Ebenen-/Layer-Icon (gestapelte Ebenen) für die Overlay-Spur.
   const LAYERS_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 2 8l10 5 10-5-10-5z"/><path d="M2 12l10 5 10-5"/><path d="M2 16l10 5 10-5"/></svg>';
 
@@ -212,12 +186,13 @@
       if ((c.type === 'video' || c.type === 'youtube') && c.videoMode !== 'duration') el.classList.add('end-video');
 
       const badge = document.createElement('span');
-      badge.className = 'tl-b-type'; badge.textContent = TYPE_BADGE[c.type] || '•';
+      badge.className = 'tl-b-type'; badge.textContent = window.CT.badge(c.type);
+      badge.title = window.CT.label(c.type);
       el.appendChild(badge);
 
       const label = document.createElement('div');
       label.className = 'tl-b-label';
-      label.textContent = c.name || c.url || c.videoId || c.type;
+      label.textContent = c.name || c.url || c.videoId || window.CT.label(c.type);
       el.appendChild(label);
 
       const dur = document.createElement('div');
@@ -233,73 +208,14 @@
     }
   }
 
-  // Filmstreifen: Keyframe-Dichte folgt dem Zoom. Der Abstand wird als Zeit-Raster G
-  // (aus „schönen" Werten) gewählt, damit ~jeden THUMB_PX Pixel ein Bild erscheint –
-  // beim Reinzoomen mehr Szenen, beim Rauszoomen weniger. Da die Zeitstempel auf dem
-  // festen Raster liegen, werden die /api/frame-Thumbnails über Zoomstufen wiederverwendet.
-  const THUMB_PX = 110;   // Ziel-Abstand zwischen Keyframes
-  const MAXF = 60;        // Obergrenze pro Block
-  function buildFilmstrip(filename, dur, pps) {
-    dur = dur || 0;
-    const strip = document.createElement('div');
-    strip.className = 'tl-filmstrip';
-    // Rasterabstand G aus netten Werten, Ziel ~THUMB_PX zwischen Bildern.
-    const target = THUMB_PX / Math.max(0.0001, pps); // Sekunden pro THUMB_PX
-    const nice = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800, 3600];
-    let G = nice.find((n) => n >= target) || 3600;
-    if (Math.ceil(dur / G) > MAXF) G = dur / MAXF; // Obergrenze einhalten
-    for (let t = 0; t < dur - 0.01; t += G) {
-      const w = Math.min(G, dur - t);
-      const img = document.createElement('img');
-      img.className = 'tl-frame'; img.loading = 'lazy'; img.alt = '';
-      img.style.left = (t * pps) + 'px';
-      img.style.width = (w * pps) + 'px';
-      img.src = `/api/frame?file=${encodeURIComponent(filename)}&t=${Math.round(t + w / 2)}`;
-      strip.appendChild(img);
-    }
-    return strip;
-  }
-
-  // YouTube-Filmstreifen aus dem Storyboard (Sprite-Sheets mit Vorschaubildern).
-  // Pro Zelle wird die passende Kachel per CSS-Hintergrund ausgeschnitten – keine
-  // Server-Bildverarbeitung nötig. Dichte folgt dem Zoom wie bei Upload-Videos.
-  const ytSb = {}; // videoId -> Storyboard-Daten | 'pending' | null
-  function ytStoryboard(videoId) {
-    if (!videoId) return null;
-    if (videoId in ytSb) return ytSb[videoId] === 'pending' ? null : ytSb[videoId];
-    ytSb[videoId] = 'pending';
-    fetch(`/api/yt-storyboard?id=${encodeURIComponent(videoId)}`)
-      .then((r) => r.json()).then((d) => { ytSb[videoId] = (d && d.ok) ? d : null; if (d && d.ok) render(); })
-      .catch(() => { ytSb[videoId] = null; });
-    return null;
-  }
-  function buildYtFilmstrip(sb, dur, pps) {
-    dur = Math.max(0, dur || sb.duration || 0);
-    const strip = document.createElement('div');
-    strip.className = 'tl-filmstrip';
-    const effInt = sb.intervalMs > 0 ? sb.intervalMs / 1000 : (sb.duration / Math.max(1, sb.frames));
-    const target = THUMB_PX / Math.max(0.0001, pps); // Sekunden pro THUMB_PX
-    const nice = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800, 3600];
-    let G = nice.find((n) => n >= target) || 3600;
-    G = Math.max(G, effInt);                          // nicht feiner als das Storyboard-Raster
-    if (Math.ceil(dur / G) > MAXF) G = dur / MAXF;    // Obergrenze
-    for (let t = 0; t < dur - 0.01; t += G) {
-      const w = Math.min(G, dur - t);
-      const fi = Math.min(sb.frames - 1, Math.max(0, Math.floor((t + w / 2) / effInt)));
-      const sheet = Math.floor(fi / (sb.cols * sb.rows));
-      const pos = fi % (sb.cols * sb.rows);
-      const col = pos % sb.cols, row = Math.floor(pos / sb.cols);
-      const cell = document.createElement('div');
-      cell.className = 'tl-frame tl-sb';
-      cell.style.left = (t * pps) + 'px';
-      cell.style.width = (w * pps) + 'px';
-      cell.style.backgroundImage = `url('${sb.sheets[sheet]}')`;
-      cell.style.backgroundSize = `${sb.cols * 100}% ${sb.rows * 100}%`;
-      cell.style.backgroundPosition = `${sb.cols > 1 ? (col / (sb.cols - 1)) * 100 : 0}% ${sb.rows > 1 ? (row / (sb.rows - 1)) * 100 : 0}%`;
-      strip.appendChild(cell);
-    }
-    return strip;
-  }
+  // Filmstreifen: Keyframe-Dichte folgt dem Zoom (siehe content.js). Die Timeline
+  // nutzt größere Kacheln als das Storyboard auf /playlists – daher die Optionen.
+  const FS_OPT = { stripCls: 'tl-filmstrip', frameCls: 'tl-frame', thumbPx: 110, maxFrames: 60 };
+  const YT_OPT = { ...FS_OPT, frameCls: 'tl-frame tl-sb' };
+  const buildFilmstrip = (filename, dur, pps) => window.CT.buildFilmstrip(filename, dur, pps, FS_OPT);
+  const buildYtFilmstrip = (sb, dur, pps) => window.CT.buildYtFilmstrip(sb, dur, pps, YT_OPT);
+  // Sobald das Storyboard geladen ist, neu zeichnen (Filmstreifen statt Standbild).
+  const ytStoryboard = (videoId) => window.CT.ytStoryboard(videoId, render);
 
   // Overlay-Spuren der AKTUELLEN (Root-)Playlist: ein Overlay ist wiederverwendbarer
   // Inhalt; seine Anzeigefenster liegen als Clips an der Playlist (mehrere je Overlay).
@@ -307,42 +223,41 @@
   // und öffnet per Klick den Overlay-Editor.
   const el2 = (t, c) => { const n = document.createElement(t); if (c) n.className = c; return n; };
   const rootPlaylist = () => state.playlists.byId[state.playlists.rootId];
+  // Speichern quittiert sichtbar (gebündelt, damit ein Ziehen EINEN Toast auslöst)
+  // und meldet Serverfehler, statt sie zu verschlucken.
+  const clipsUrl = () => `/api/playlist/${state.playlists.rootId}/overlay-clips`;
   function apiPatchClip(clipId, fields) {
-    fetch(`/api/playlist/${state.playlists.rootId}/overlay-clips/${clipId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(fields) });
+    return U.save('PATCH', `${clipsUrl()}/${clipId}`, fields).catch(() => {});
   }
   function apiDeleteClip(clipId) {
-    fetch(`/api/playlist/${state.playlists.rootId}/overlay-clips/${clipId}`, { method: 'DELETE' });
+    return U.save('DELETE', `${clipsUrl()}/${clipId}`).catch(() => {});
   }
   function apiAddClip(overlayId, start) {
-    return fetch(`/api/playlist/${state.playlists.rootId}/overlay-clips`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ overlayId, start: Math.max(0, start || 0), duration: null }) });
+    return U.save('POST', clipsUrl(), { overlayId, start: Math.max(0, start || 0), duration: null });
   }
   function renderOverlayLanes() {
     const gut = $('ov-gutter'), lanes = $('ov-lanes');
     gut.innerHTML = ''; lanes.innerHTML = '';
     const pl = rootPlaylist();
     const clips = (pl && pl.overlayClips) || [];
-    // Picker mit allen vorhandenen Overlays füllen.
-    const pick = $('tl-ov-pick');
-    if (pick && document.activeElement !== pick) {
-      pick.innerHTML = '';
-      for (const o of (state.overlays || [])) { const op = el2('option'); op.value = o.id; op.textContent = o.name; pick.appendChild(op); }
-    }
     // Clips nach Overlay gruppieren (Reihenfolge wie state.overlays).
     const groups = [];
     for (const o of (state.overlays || [])) { const cs = clips.filter((c) => c.overlayId === o.id); if (cs.length) groups.push({ o, clips: cs }); }
     if (!groups.length) {
-      const gl = el2('div', 'tl-gutter-label'); gl.innerHTML = `<span class="ic">${LAYERS_ICON}</span> Overlay`;
+      const gl = el2('div', 'tl-gutter-label'); gl.innerHTML = `<span class="ic" aria-hidden="true">${LAYERS_ICON}</span> Overlay`;
       gut.appendChild(gl);
-      const lane = el2('div', 'tl-lane empty'); lane.textContent = 'Keine Overlay-Fenster – oben „+ Fenster" / „✦ + Overlay"';
+      const lane = el2('div', 'tl-lane empty'); lane.textContent = 'Keine Overlay-Fenster – über „+ Einfügen" anlegen';
       lanes.appendChild(lane);
       return;
     }
     for (const g of groups) {
       const gl = el2('div', 'tl-gutter-label');
-      const ic = el2('span', 'ic'); ic.innerHTML = LAYERS_ICON;
+      const ic = el2('span', 'ic'); ic.innerHTML = LAYERS_ICON; ic.setAttribute('aria-hidden', 'true');
       const nm = el2('span'); nm.textContent = g.o.name; nm.style.cssText = 'flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
-      const add = el2('button', 'tl-ov-eye'); add.textContent = '＋'; add.title = 'Weiteres Fenster am Playhead';
-      add.addEventListener('click', () => apiAddClip(g.o.id, playheadT));
+      // Spurgebundenes Einfügen: fügt ein Fenster GENAU dieses Overlays ein und ist
+      // damit eine andere Handlung als das allgemeine "+ Einfügen"-Menü.
+      const add = U.iconBtn('＋', `Weiteres Fenster von „${g.o.name}" am Playhead einfügen`, 'tl-ov-eye',
+        () => apiAddClip(g.o.id, playheadT));
       gl.append(ic, nm, add);
       gut.appendChild(gl);
       const lane = el2('div', 'tl-lane');
@@ -362,19 +277,26 @@
     const lh = el2('div', 'tl-ov-handle l'), rh = el2('div', 'tl-ov-handle r');
     const label = el2('span', 'tl-ov-label');
     label.textContent = o.name + (c.duration == null ? ' · immer' : '');
-    const eye = el2('button', 'tl-ov-eye');
-    eye.textContent = c.enabled ? '👁' : '🚫'; eye.title = 'Ein-/ausblenden';
+    const eye = U.iconBtn(c.enabled ? '👁' : '🚫',
+      c.enabled ? `„${o.name}" ausblenden` : `„${o.name}" einblenden`, 'tl-ov-eye',
+      (e) => { e.stopPropagation(); apiPatchClip(c.id, { enabled: !c.enabled }); });
     eye.addEventListener('pointerdown', (e) => e.stopPropagation());
-    eye.addEventListener('click', (e) => { e.stopPropagation(); apiPatchClip(c.id, { enabled: !c.enabled }); });
-    const del = el2('button', 'tl-ov-eye');
-    del.textContent = '🗑'; del.title = 'Fenster entfernen';
+    const del = U.iconBtn('🗑', `Fenster von „${o.name}" entfernen`, 'tl-ov-eye', async (e) => {
+      e.stopPropagation();
+      const ok = await U.confirmDialog({
+        title: 'Overlay-Fenster entfernen?',
+        text: `Das Anzeigefenster von „${o.name}" wird aus dieser Playlist entfernt. Das Overlay selbst bleibt erhalten.`,
+        confirmLabel: 'Entfernen', danger: true
+      });
+      if (ok) apiDeleteClip(c.id);
+    });
     del.addEventListener('pointerdown', (e) => e.stopPropagation());
-    del.addEventListener('click', (e) => { e.stopPropagation(); apiDeleteClip(c.id); });
     clip.append(lh, label, eye, del, rh);
 
     bindClipDrag(clip, c);
     bindTrim(lh, c, 'l'); bindTrim(rh, c, 'r');
     clip.addEventListener('click', () => { if (!suppressClick) location.href = '/overlay?overlay=' + o.id; });
+    clip.title = `Ziehen = verschieben · Ränder = Länge · Klick öffnet den Overlay-Editor`;
     return clip;
   }
 
@@ -430,27 +352,59 @@
 
   // ===== Kapitel (benannte Bereiche; schnelles Springen) ===================
   function chaptersOf(pl) { return (pl && pl.chapters) || []; }
+  const chaptersUrl = () => `/api/playlist/${state.playlists.rootId}/chapters`;
   function apiPatchChapter(id, fields) {
-    fetch(`/api/playlist/${state.playlists.rootId}/chapters/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(fields) });
+    return U.save('PATCH', `${chaptersUrl()}/${id}`, fields).catch(() => {});
   }
   function apiDeleteChapter(id) {
-    fetch(`/api/playlist/${state.playlists.rootId}/chapters/${id}`, { method: 'DELETE' });
+    return U.save('DELETE', `${chaptersUrl()}/${id}`).catch(() => {});
   }
-  // Live-Sprung (wirkt sofort auf der Wand) an den Kapitelanfang.
-  function jumpChapterLive(chapterId) {
-    fetch('/api/play', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ playlistId: state.playlists.rootId, chapterId }) });
+  // Live-Sprung: wirkt SOFORT auf der Wand (kein Entwurf, kein Go Live nötig).
+  async function jumpChapterLive(chapter) {
+    try {
+      await U.api('POST', '/api/play', { playlistId: state.playlists.rootId, chapterId: chapter.id });
+      U.toast(`Live: ${chapter.name}`);
+    } catch (_) {}
   }
-  function addChapterHere() {
-    const name = prompt('Kapitelname:', `Kapitel ${fmtClock(playheadT)}`);
-    if (name == null) return;
-    fetch(`/api/playlist/${state.playlists.rootId}/chapters`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() || 'Kapitel', start: Math.round(playheadT) }) });
+  // Kapitel am Playhead anlegen – mit Farbe, die vorher nur per API setzbar war.
+  async function addChapterHere() {
+    const res = await U.promptDialog({
+      title: `Kapitel bei ${fmtClock(playheadT)} anlegen`,
+      label: 'Name des Kapitels',
+      value: `Kapitel ${fmtClock(playheadT)}`,
+      confirmLabel: 'Anlegen',
+      extraFields: [{ key: 'color', label: 'Farbe', input: U.colorInput('#4f8cff') }]
+    });
+    if (!res) return;
+    await U.save('POST', chaptersUrl(), {
+      name: res.value || 'Kapitel', start: Math.round(playheadT), color: res.color
+    }).catch(() => {});
+  }
+  async function renameChapter(c) {
+    const res = await U.promptDialog({
+      title: 'Kapitel bearbeiten',
+      label: 'Name des Kapitels',
+      value: c.name,
+      extraFields: [{ key: 'color', label: 'Farbe', input: U.colorInput(c.color || '#4f8cff') }]
+    });
+    if (!res) return;
+    apiPatchChapter(c.id, { name: res.value || 'Kapitel', color: res.color });
+  }
+  async function deleteChapter(c) {
+    // Vorher wurde ein Kapitel ohne Rückfrage gelöscht, ein Highlight aber mit.
+    const ok = await U.confirmDialog({
+      title: 'Kapitel löschen?',
+      text: `„${c.name}" wird aus der Playlist entfernt. Die Inhalte selbst bleiben unverändert.`,
+      confirmLabel: 'Löschen', danger: true
+    });
+    if (ok) apiDeleteChapter(c.id);
   }
 
   function renderChapterLane() {
     const lane = $('lane-chapters');
     lane.innerHTML = '';
     const chs = chaptersOf(rootPlaylist());
-    if (!chs.length) { lane.classList.add('empty'); lane.textContent = 'Keine Kapitel – „📑 + Kapitel" am Playhead'; return; }
+    if (!chs.length) { lane.classList.add('empty'); lane.textContent = 'Keine Kapitel – über „+ Einfügen" am Playhead anlegen'; return; }
     lane.classList.remove('empty');
     for (let i = 0; i < chs.length; i++) {
       const c = chs[i], next = chs[i + 1];
@@ -467,17 +421,24 @@
     seg.style.setProperty('--chap-color', c.color || '#4f8cff');
     const lh = el2('div', 'tl-ov-handle l'), rh = el2('div', 'tl-ov-handle r');
     const label = el2('span', 'tl-ov-label'); label.textContent = c.name;
-    const ren = el2('button', 'tl-ov-eye'); ren.textContent = '✏'; ren.title = 'Umbenennen';
+    // Der Live-Sprung braucht eine EIGENE Schaltfläche: ein Klick auf das Segment
+    // scrubbt nur die Vorschau. Vorher bedeutete derselbe Klick auf dem Chip oben
+    // "sofort live" und hier "nur Vorschau" – ohne jeden Hinweis.
+    const live = U.iconBtn('▶', `„${c.name}" sofort live auf die Wand`, 'tl-ov-eye live',
+      (e) => { e.stopPropagation(); jumpChapterLive(c); });
+    live.addEventListener('pointerdown', (e) => e.stopPropagation());
+    const ren = U.iconBtn('✏', `„${c.name}" bearbeiten`, 'tl-ov-eye',
+      (e) => { e.stopPropagation(); renameChapter(c); });
     ren.addEventListener('pointerdown', (e) => e.stopPropagation());
-    ren.addEventListener('click', (e) => { e.stopPropagation(); const n = prompt('Kapitelname:', c.name); if (n != null) apiPatchChapter(c.id, { name: n.trim() || 'Kapitel' }); });
-    const del = el2('button', 'tl-ov-eye'); del.textContent = '🗑'; del.title = 'Kapitel löschen';
+    const del = U.iconBtn('🗑', `„${c.name}" löschen`, 'tl-ov-eye',
+      (e) => { e.stopPropagation(); deleteChapter(c); });
     del.addEventListener('pointerdown', (e) => e.stopPropagation());
-    del.addEventListener('click', (e) => { e.stopPropagation(); apiDeleteChapter(c.id); });
-    seg.append(lh, label, ren, del, rh);
+    seg.append(lh, label, live, ren, del, rh);
     bindChapterDrag(seg, c);
     bindChapterTrim(lh, c, 'l'); bindChapterTrim(rh, c, 'r');
-    // Klick im Editor = Vorschau an den Anfang scrubben.
+    // Klick im Editor = Vorschau an den Anfang scrubben (Wand bleibt unangetastet).
     seg.addEventListener('click', () => { if (!suppressClick) scrubTo(c.start || 0); });
+    seg.title = `Klick = Vorschau an den Anfang · ▶ = sofort live · Ziehen = verschieben`;
     return seg;
   }
   function bindChapterDrag(seg, c) {
@@ -528,33 +489,59 @@
     bar.classList.toggle('hidden', !chs.length);
     for (const c of chs) {
       const chip = el2('button', 'chapter-chip');
+      chip.type = 'button';
       chip.style.setProperty('--chap-color', c.color || '#4f8cff');
       const dot = el2('span', 'chip-dot');
       const nm = el2('span'); nm.textContent = c.name;
       const tm = el2('span', 'chip-time'); tm.textContent = fmtClock(c.start || 0);
-      chip.append(dot, nm, tm);
-      chip.title = 'Live an diese Stelle springen';
-      chip.addEventListener('click', () => jumpChapterLive(c.id));
+      // Sichtbares Zeichen, dass dieser Klick SOFORT auf der Wand wirkt.
+      const go = el2('span', 'chip-live'); go.textContent = '▶ live'; go.setAttribute('aria-hidden', 'true');
+      chip.append(dot, nm, tm, go);
+      chip.title = `„${c.name}" sofort live auf die Wand springen`;
+      chip.setAttribute('aria-label', `${c.name} bei ${fmtClock(c.start || 0)} – sofort live auf die Wand springen`);
+      chip.addEventListener('click', () => jumpChapterLive(c));
       bar.appendChild(chip);
     }
   }
 
   // ===== Highlights (kuratierte, playlist-übergreifende Schnellzugriffe) ====
-  function jumpHighlightLive(id) {
-    fetch('/api/play', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ highlightId: id }) });
+  async function jumpHighlightLive(h) {
+    try {
+      await U.api('POST', '/api/play', { highlightId: h.id });
+      U.toast(`Live: ${h.name}`);
+    } catch (_) {}
   }
-  function apiPatchHighlight(id, fields) { fetch(`/api/highlights/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(fields) }); }
-  function apiDeleteHighlight(id) { fetch(`/api/highlights/${id}`, { method: 'DELETE' }); }
+  const apiPatchHighlight = (id, fields) => U.save('PATCH', `/api/highlights/${id}`, fields).catch(() => {});
+  const apiDeleteHighlight = (id) => U.save('DELETE', `/api/highlights/${id}`).catch(() => {});
   function moveHighlight(idx, dir) {
     const ids = (state.highlights || []).map((h) => h.id);
     const j = idx + dir; if (j < 0 || j >= ids.length) return;
     [ids[idx], ids[j]] = [ids[j], ids[idx]];
-    fetch('/api/highlights/order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ order: ids }) });
+    U.save('POST', '/api/highlights/order', { order: ids }).catch(() => {});
   }
-  function addHighlightHere() {
-    const name = prompt('Name des Highlights:', `Highlight ${fmtClock(playheadT)}`);
-    if (name == null) return;
-    fetch('/api/highlights', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() || 'Highlight', playlistId: state.playlists.rootId, start: Math.round(playheadT) }) });
+  async function addHighlightHere() {
+    const res = await U.promptDialog({
+      title: `Highlight bei ${fmtClock(playheadT)} speichern`,
+      label: 'Name des Highlights',
+      value: `Highlight ${fmtClock(playheadT)}`,
+      confirmLabel: 'Speichern'
+    });
+    if (!res) return;
+    await U.save('POST', '/api/highlights', {
+      name: res.value || 'Highlight', playlistId: state.playlists.rootId, start: Math.round(playheadT)
+    }).catch(() => {});
+  }
+  async function renameHighlight(h) {
+    const res = await U.promptDialog({ title: 'Highlight umbenennen', label: 'Name', value: h.name });
+    if (res) apiPatchHighlight(h.id, { name: res.value || 'Highlight' });
+  }
+  async function deleteHighlight(h) {
+    const ok = await U.confirmDialog({
+      title: 'Highlight löschen?',
+      text: `Der Schnellzugriff „${h.name}" wird entfernt. Die Playlist und ihre Inhalte bleiben unverändert.`,
+      confirmLabel: 'Löschen', danger: true
+    });
+    if (ok) apiDeleteHighlight(h.id);
   }
   function renderHighlights() {
     const list = $('highlights-list');
@@ -563,28 +550,35 @@
     const hls = state.highlights || [];
     if (!hls.length) {
       const hint = el2('span', 'hint'); hint.style.margin = '0';
-      hint.textContent = 'Noch keine Highlights – „⭐ + Highlight" speichert die aktuelle Position.';
+      hint.textContent = 'Noch keine Highlights – über „+ Einfügen" die aktuelle Position speichern.';
       list.appendChild(hint); return;
     }
     const byId = state.playlists.byId;
     hls.forEach((h, idx) => {
       const card = el2('div', 'hl-card');
-      card.style.setProperty('--hl-color', h.color || '#f6c453');
+      card.style.setProperty('--hl-color', h.color || 'var(--start)');
       const jump = el2('button', 'hl-btn');
+      jump.type = 'button';
       const nm = el2('span', 'hl-name'); nm.textContent = h.name;
       const meta = el2('span', 'hl-meta'); meta.textContent = `${byId[h.playlistId] ? byId[h.playlistId].name : '??'} · ${fmtClock(h.start || 0)}`;
-      jump.append(nm, meta); jump.title = 'Live dorthin springen';
-      jump.addEventListener('click', () => jumpHighlightLive(h.id));
+      jump.append(nm, meta);
+      jump.title = `„${h.name}" sofort live auf die Wand springen`;
+      jump.setAttribute('aria-label', jump.title);
+      jump.addEventListener('click', () => jumpHighlightLive(h));
+
+      // Reihenfolge bleibt sichtbar (häufig genutzt); Umbenennen/Löschen wandern
+      // ins ⋯-Menü – dieselbe Systematik wie bei den Playlist-Karten.
       const ctr = el2('div', 'hl-ctrls');
-      const up = el2('button', 'hl-mini'); up.textContent = '↑'; up.title = 'nach oben'; up.disabled = idx === 0;
-      up.addEventListener('click', () => moveHighlight(idx, -1));
-      const down = el2('button', 'hl-mini'); down.textContent = '↓'; down.title = 'nach unten'; down.disabled = idx === hls.length - 1;
-      down.addEventListener('click', () => moveHighlight(idx, 1));
-      const ren = el2('button', 'hl-mini'); ren.textContent = '✏'; ren.title = 'Umbenennen';
-      ren.addEventListener('click', () => { const n = prompt('Highlight-Name:', h.name); if (n != null) apiPatchHighlight(h.id, { name: n.trim() || 'Highlight' }); });
-      const del = el2('button', 'hl-mini'); del.textContent = '🗑'; del.title = 'Löschen';
-      del.addEventListener('click', () => { if (confirm(`Highlight „${h.name}" löschen?`)) apiDeleteHighlight(h.id); });
-      ctr.append(up, down, ren, del);
+      const up = U.iconBtn('↑', `„${h.name}" nach vorn`, 'hl-mini', () => moveHighlight(idx, -1));
+      up.disabled = idx === 0;
+      const down = U.iconBtn('↓', `„${h.name}" nach hinten`, 'hl-mini', () => moveHighlight(idx, 1));
+      down.disabled = idx === hls.length - 1;
+      ctr.append(up, down);
+      const more = U.overflowMenu([
+        { label: '✏ Umbenennen', onClick: () => renameHighlight(h) },
+        { label: '🗑 Löschen', danger: true, onClick: () => deleteHighlight(h) }
+      ], { label: `Weitere Aktionen für „${h.name}"`, btnCls: 'hl-mini' });
+      ctr.appendChild(more);
       card.append(jump, ctr);
       list.appendChild(card);
     });
@@ -593,6 +587,7 @@
   function positionPlayhead() {
     const px = playheadT * pxPerSec;
     $('tl-playhead').style.left = px + 'px';
+    $('tl-prog-scrub').style.width = Math.max(0, px) + 'px'; // grauer Fortschritt bis zum Scrubhead
     $('prog-clock').textContent = `${fmtClock(playheadT)} / ${fmtClock(total)}`;
     // Playhead im Sichtbereich halten (außer beim Scrubben/Zoomen, die scrollen selbst).
     if (!scrubbing && !zooming) {
@@ -601,6 +596,25 @@
         sc.scrollLeft = Math.max(0, px - sc.clientWidth / 2);
       }
     }
+    updateLiveMarker();
+  }
+
+  // Aktuelle Live-Programmzeit der Wand (lokal interpoliert), oder null wenn unbekannt.
+  function liveProgTime() {
+    if (!liveProg.ts) return null;
+    return Math.min(total, liveProg.t + (performance.now() - liveProg.ts) / 1000);
+  }
+  // Roter Live-Marker + roter Fortschritt: läuft an der echten Wand-Position immer
+  // mit, unabhängig davon, wohin der (graue) Scrubhead gerade gezogen wurde.
+  function updateLiveMarker() {
+    const head = $('tl-livehead'), fill = $('tl-prog-live');
+    if (!head || !fill) return;
+    const lt = liveProgTime();
+    if (lt == null) { head.classList.add('hidden'); fill.classList.add('hidden'); return; }
+    head.classList.remove('hidden'); fill.classList.remove('hidden');
+    const px = lt * pxPerSec;
+    head.style.left = px + 'px';
+    fill.style.width = Math.max(0, px) + 'px';
   }
 
   function applyLiveNow() {
@@ -703,20 +717,44 @@
   const endPinch = (e) => { pinchPts.delete(e.pointerId); if (pinchPts.size < 2) pinch = null; };
   sc0.addEventListener('pointerup', endPinch);
   sc0.addEventListener('pointercancel', endPinch);
+  // ===== "+ Einfügen" ======================================================
+  // Ein Menü statt vier Schaltflächen und einer dauerhaft sichtbaren Auswahlliste.
+  // Alle Einträge beziehen sich auf die aktuelle Playhead-Position.
+  async function addOverlayClipHere() {
+    const overlays = state.overlays || [];
+    if (!overlays.length) { newOverlayHere(); return; }
+    const sel = U.selectInput(overlays.map((o) => [o.id, o.name]), overlays[0].id);
+    const body = U.el('div', 'dlg-fields');
+    body.append(
+      U.field('Welches Overlay?', sel),
+      U.el('p', 'hint', `Das Anzeigefenster beginnt bei ${fmtClock(playheadT)} und läuft zunächst bis zum Programmende. Länge und Lage danach direkt in der Spur ziehen.`)
+    );
+    U.dialog({
+      title: 'Overlay-Fenster einfügen',
+      body,
+      actions: [
+        { label: 'Abbrechen', cls: 'ghost', onClick: (h) => h.close() },
+        { label: 'Einfügen', onClick: (h) => { h.close(); apiAddClip(sel.value, playheadT); } }
+      ]
+    });
+  }
   // Neues Overlay anlegen + Fenster (Clip) am Playhead, dann zum Editor.
-  $('tl-add-overlay').addEventListener('click', async () => {
-    const r = await fetch('/api/overlay', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
-    const o = await r.json().catch(() => null);
-    if (o && o.id) { try { await apiAddClip(o.id, playheadT); } catch (_) {} location.href = '/overlay?overlay=' + o.id; }
-  });
-  // Vorhandenes Overlay als Fenster am Playhead in die aktuelle Playlist einfügen.
-  $('tl-ov-addclip').addEventListener('click', () => {
-    const id = $('tl-ov-pick').value;
-    if (id) apiAddClip(id, playheadT);
-  });
-  // Kapitel / Highlight am Playhead anlegen.
-  $('tl-add-chapter').addEventListener('click', addChapterHere);
-  $('tl-add-highlight').addEventListener('click', addHighlightHere);
+  async function newOverlayHere() {
+    try {
+      const o = await U.api('POST', '/api/overlay', {});
+      if (!o || !o.id) return;
+      await apiAddClip(o.id, playheadT);
+      location.href = '/overlay?overlay=' + o.id;
+    } catch (_) {}
+  }
+  $('tl-insert').appendChild(U.overflowMenu([
+    { label: '📑 Kapitel am Playhead', onClick: addChapterHere },
+    { label: '⭐ Position als Highlight', onClick: addHighlightHere },
+    'sep',
+    { label: '✦ Overlay-Fenster einfügen…', onClick: addOverlayClipHere },
+    { label: '✦ Neues Overlay anlegen', onClick: newOverlayHere }
+  ], { glyph: '+ Einfügen', label: 'Am Playhead einfügen', btnCls: 'tl-tbtn tl-insert-btn' }));
+
   window.addEventListener('resize', () => { syncPreviewTop(); updatePreviewCollapse(); render(); });
 
   // ===== Vorschau-Skalierung (18:16) =======================================
@@ -770,13 +808,13 @@
     if (changed) $('prev-frame').src = m === 'live' ? '/screen?view=live' : '/screen';
     $('tl-transport').style.display = m === 'draft' ? '' : 'none';
     $('tl-live').classList.toggle('hidden', m === 'live');
-    $('prog-mode').textContent = m === 'live' ? 'Live-Vorschau (Wand)' : 'Entwurf-Vorschau – am Zeitstrahl scrubben';
-    // Live-Hinweis: Badge + roter Rahmen, wenn die Vorschau die Wand spiegelt.
+    // EIN Statusindikator: Badge (samt Erklärung) plus roter Rahmen. Der frühere
+    // zusätzliche Text neben der Uhr sagte dasselbe ein zweites Mal.
     const live = m === 'live';
     $('prev-stage').classList.toggle('live', live);
     const badge = $('prog-live-badge');
     badge.classList.toggle('is-live', live);
-    badge.textContent = live ? '● LIVE auf der Wand' : 'ENTWURF';
+    badge.textContent = live ? '● LIVE auf der Wand' : 'ENTWURF – am Zeitstrahl scrubben';
     if (m === 'draft' && changed) seedDraftToPlayhead();
   }
   // Nach Moduswechsel die (neu ladende) Entwurf-Vorschau auf den Playhead setzen.
@@ -792,7 +830,9 @@
   setInterval(() => {
     if (mode === 'live' && !scrubbing && liveProg.ts) {
       playheadT = Math.min(total, liveProg.t + (performance.now() - liveProg.ts) / 1000);
-      positionPlayhead();
+      positionPlayhead();         // positioniert Scrub- + Live-Marker
+    } else {
+      updateLiveMarker();         // im Entwurf läuft die rote Live-Linie weiter mit
     }
   }, 200);
 
@@ -844,14 +884,11 @@
     if (became && mode === 'live') setPreviewMode('draft'); // Bearbeitung -> Entwurf-Vorschau
     updateGoLive();
   }
+  // dirty = unveröffentlichte Änderungen; positioned = Playhead wurde bewegt, man
+  // kann also bewusst ab dieser Stelle live gehen.
   function updateGoLive() {
-    const live = $('go-live');
-    const show = dirtyState || positioned;
-    live.classList.toggle('hidden', !show);
-    live.classList.toggle('pending', dirtyState);
-    live.textContent = dirtyState ? '● Preview & Go Live' : 'Preview & Go Live';
+    draft.update({ dirty: dirtyState, show: dirtyState || positioned });
   }
-  $('go-live').addEventListener('click', openGoLive);
 
   function openGoLive() {
     $('golive-frame').src = '/screen';
@@ -874,98 +911,28 @@
     if (e.key === 'Escape' && !$('golive-modal').classList.contains('hidden')) closeGoLive();
   });
 
-  // ---- Slide-to-go-live (übernommen aus dem alten /settings-Flow) ----------
-  let slideX = 0, sliding = false, slideDone = false;
-  function slideTravel() { return $('golive-slider').clientWidth - $('slide-handle').offsetWidth - 8; }
-  function setSlide(x) {
-    const max = slideTravel();
-    slideX = Math.max(0, Math.min(max, x));
-    $('slide-handle').style.transform = `translateX(${slideX}px)`;
-    $('slide-fill').style.width = `${slideX + $('slide-handle').offsetWidth}px`;
-  }
-  function resetSlide() {
-    slideDone = false; sliding = false;
-    $('slide-handle').style.transition = '';
-    setSlide(0);
-  }
-  async function fireGoLive() {
-    if (slideDone) return;
-    slideDone = true;
-    setSlide(slideTravel());
+  // ---- Slide-to-go-live (Gestik aus ui.js, hier nur die Wirkung) -----------
+  const goliveSlide = U.bindSlide($('golive-slider'), async () => {
     // Wand ab dem Cursor (Playhead) starten: Position mitgeben.
     const e = entryAt(playheadT);
     const body = e ? { goto: { itemId: e.itemId, time: e.offset, progTime: playheadT } } : {};
-    try { await fetch('/api/golive', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); } catch (_) {}
+    try {
+      await U.api('POST', '/api/golive', body);
+      U.toast('Auf der Wand veröffentlicht');
+    } catch (_) {}
     closeGoLive();
     positioned = false;
     setPreviewMode('live'); // jetzt ist Entwurf = Live -> Live-Spiegel zeigen
-  }
-  (function bindSlide() {
-    const handle = $('slide-handle');
-    let startX = 0, startSlide = 0;
-    handle.addEventListener('pointerdown', (e) => {
-      if (slideDone) return;
-      sliding = true; startX = e.clientX; startSlide = slideX;
-      handle.style.transition = 'none';
-      handle.setPointerCapture(e.pointerId);
-    });
-    handle.addEventListener('pointermove', (e) => { if (sliding) setSlide(startSlide + (e.clientX - startX)); });
-    const end = () => {
-      if (!sliding) return;
-      sliding = false;
-      handle.style.transition = 'transform 0.2s ease';
-      if (slideX >= slideTravel() * 0.95) fireGoLive();
-      else setSlide(0);
-    };
-    handle.addEventListener('pointerup', end);
-    handle.addEventListener('pointercancel', end);
-  })();
+  });
+  const resetSlide = () => goliveSlide.reset();
   window.addEventListener('resize', () => {
     if (!$('golive-modal').classList.contains('hidden')) {
       scaleGolivePreview();
-      if (!sliding) setSlide(slideDone ? slideTravel() : 0);
+      goliveSlide.refresh();
     }
   });
 
-  // ===== Systemlautstärke (übernommen aus dem /settings-Flow) ==============
-  const volRange = $('vol-range'), volVal = $('vol-val'), volMute = $('vol-mute');
-  let lastVolSent = 0;
-  function renderVol(d) {
-    if (d && typeof d.level === 'number') {
-      const pct = Math.round(d.level * 100);
-      if (document.activeElement !== volRange) volRange.value = pct;
-      volVal.textContent = pct + '%';
-    } else { volVal.textContent = '–'; }
-    if (d && d.muted !== undefined) volMute.textContent = d.muted ? '🔇' : '🔊';
-  }
-  async function loadVol() {
-    try {
-      const r = await fetch('/api/volume');
-      if (!r.ok) throw new Error();
-      renderVol(await r.json());
-    } catch (_) { volVal.textContent = '–'; volRange.disabled = true; }
-  }
-  async function postVol(payload) {
-    try {
-      const r = await fetch('/api/volume', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-      if (r.ok) renderVol(await r.json());
-    } catch (_) {}
-  }
-  volRange.addEventListener('input', () => {
-    const pct = Number(volRange.value);
-    volVal.textContent = pct + '%';
-    const now = Date.now();
-    if (now - lastVolSent > 120) { postVol({ level: pct / 100 }); lastVolSent = now; }
-  });
-  volRange.addEventListener('change', () => postVol({ level: Number(volRange.value) / 100 }));
-  volMute.addEventListener('click', () => postVol({ mute: 'toggle' }));
-  loadVol();
-
   // ===== Utils =============================================================
-  function fmtClock(s) {
-    s = Math.max(0, Math.floor(s || 0));
-    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-  }
   // Tick-Abstand so wählen, dass Beschriftungen ~70px auseinander liegen.
   function chooseStep(pps) {
     const target = 70 / pps; // Sekunden pro ~70px

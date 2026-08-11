@@ -89,7 +89,7 @@ Diese Standardannahmen sind im Code kommentiert und leicht änderbar:
    durchlaufen; ihre Nachfolge-Aktion (`after`) greift nur, wenn sie selbst die
    Start-/Top-Playlist ist. Zyklen werden serverseitig verhindert.
 4. **Crop-Seitenverhältnis:** **18:16 (= 9:8)**, exakt wie gefordert. Falls 16:9
-   gemeint war, in `public/js/control.js` (`aspectRatio: 18 / 16`) anpassen.
+   gemeint war, in `public/js/playlists.js` (`aspectRatio: 18 / 16`) anpassen.
 5. **Authentifizierung:** keine (rein lokal). Bei Bedarf nachrüstbar.
 6. **Mehrere Anzeigen:** unterstützt (WebSocket-Broadcast an alle Clients).
 
@@ -137,9 +137,21 @@ public/
   playlists.html       Playlist-Editor /playlists (Inhalte zusammenstellen)
   screen.html          Anzeige /screen
   overlay.html         Overlay-Canvas-Editor /overlay
+  css/base.css         Design-Tokens + gemeinsame Bausteine (alle Steuer-Seiten)
   css/control.css  css/programm.css  css/overlay.css  css/monitor.css  css/screen.css
+  js/ui.js             Gemeinsames UI-Fundament: Dialoge, Toasts, Formularfelder,
+                       Slide-to-confirm, WebSocket, Navigation, Entwurfs-Leiste
+  js/content.js        Content-Typ-Register (Typen, Felder, Dauern, Filmstreifen)
   js/programm.js   js/playlists.js   js/overlay.js    js/monitor.js    js/screen.js
 ```
+
+**Oberfläche:** Alle Steuer-Seiten teilen eine Kopfzeilen-Navigation
+(Monitor · Programm · Playlists · Overlays · Hilfe) und eine Entwurfs-Leiste, die
+unveröffentlichte Änderungen anzeigt. Gespeicherte Änderungen werden per Toast
+quittiert; Bestätigungen und Eingaben laufen über eigene Dialoge (kein
+`alert`/`confirm`/`prompt`). Inhaltstypen kommen aus **einem** Register
+(`js/content.js`) – dort ergänzt, wirkt ein neuer Typ überall: im
+„Inhalt hinzufügen"-Dialog, in den Feldern je Eintrag, im Storyboard und in der Timeline.
 
 ## API (intern)
 

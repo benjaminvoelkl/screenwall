@@ -6,7 +6,11 @@
   Ein HTTP-Server (Port `3000`) und – für die Bildschirmfreigabe – ein zweiter
   **HTTPS-Server** (Port `3443`, selbst-signiert). Ein einziger WebSocket-Server
   bedient beide Transports.
-- **Frontend:** Vanilla JS (kein Framework), je Seite ein `public/js/*.js`.
+- **Frontend:** Vanilla JS (kein Framework, kein Build-Step), je Seite ein
+  `public/js/*.js` plus zwei gemeinsame Module: **`js/ui.js`** (Dialoge, Toasts,
+  Formular-Bausteine, Slide-to-confirm, WebSocket, Navigation, Entwurfs-Leiste) und
+  **`js/content.js`** (Content-Typ-Register). Beide hängen sich als `window.UI` /
+  `window.CT` an und werden **vor** dem Seiten-Skript eingebunden.
 - **Persistenz:** zwei JSON-Dateien – `state.json` (**Entwurf**) und `live.json`
   (**veröffentlicht / Wand**). Überleben Neustarts.
 - **Echtzeit:** Der Server broadcastet bei jeder Änderung den passenden Zustand
@@ -26,12 +30,31 @@ public/
   screen.html + js/screen.js       Wand-Anzeige (/screen)
   share.html + js/share.js         Bildschirm teilen (/share, HTTPS)
   docs.html + docs/*.md            diese Doku
-  css/*.css
+  js/ui.js                         gemeinsames UI-Fundament (window.UI)
+  js/content.js                    Content-Typ-Register (window.CT)
+  css/base.css                     Tokens + gemeinsame Bausteine (zuerst laden)
+  css/*.css                        je Seite die Ergänzungen darauf
 uploads/               hochgeladene Bilder/Videos
 .thumbs/               gecachte Video-Keyframes (ffmpeg)
 certs/                 selbst-signiertes TLS-Zertifikat (auto-erzeugt)
 state.json / live.json Zustand (Entwurf / Live)
 ```
+
+### Einen neuen Content-Typ ergänzen
+
+Typen sind an **einer** Stelle beschrieben: `public/js/content.js`.
+
+1. Eintrag in `CT.TYPES` (`type`, `badge`, `label`, `hint`) – der `hint` ist der
+   erklärende Satz auf der Kachel im Dialog „Inhalt hinzufügen".
+2. Zweig in `buildAddForm(type, ctx)`: Felder bauen und im `submit()` den passenden
+   API-Aufruf machen. Validierung gehört ans Feld (`setError`), nicht in einen Toast.
+3. Zweig in `itemControls(item, ctx)` für die Bearbeitung je Eintrag
+   (Reihenfolge überall gleich: **Name → typspezifisch → Dauer**).
+4. Serverseitig den Typ in `CONTENT_TYPES` und `normalizeContent()` (`server.js`)
+   aufnehmen.
+
+Kacheln, Felder, Storyboard-Symbole auf `/playlists` und die Block-Symbole der
+Timeline auf `/programm` folgen dann automatisch.
 
 ## Starten & Entwickeln
 

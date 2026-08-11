@@ -1,10 +1,16 @@
 // Playlist-Editor /playlists. Verwaltet PLAYLISTS + CONTENTS über die /api/playlist-
 // Routen; der Server persistiert und broadcastet. Per WebSocket bleiben mehrere
 // Editoren und alle /screen-Geräte synchron. Änderungen landen im Entwurf; das
-// Veröffentlichen ("Preview & Go Live") geschieht auf der Programm-Timeline (/programm).
+// Veröffentlichen ("Preview & Go Live") geschieht auf der Programm-Timeline (/programm)
+// – die Entwurfs-Leiste oben führt dorthin.
+//
+// Gemeinsame Bausteine: ui.js (Dialoge, Toasts, Formularfelder, WebSocket) und
+// content.js (Content-Typ-Register: Kacheln, Felder, Storyboard-Symbole).
 
 (() => {
-  const $ = (id) => document.getElementById(id);
+  const U = window.UI;
+  const CT = window.CT;
+  const { $, fmtClock, escapeHtml } = U;
 
   let state = null;
   // Modus aus der URL: ?edit=<id> = Detail/Bearbeiten einer Playlist, sonst Übersicht.
@@ -13,49 +19,33 @@
   let selectedId = editId;      // im Detail-Modus die bearbeitete Playlist
   let liveNowPlaying = null;    // Was läuft gerade live auf der Wand?
 
-  // ---- API-Helfer ---------------------------------------------------------
-  async function api(method, url, body) {
-    const opt = { method, headers: { 'Content-Type': 'application/json' } };
-    if (body !== undefined) opt.body = JSON.stringify(body);
-    const r = await fetch(url, opt);
-    return r.json().catch(() => ({}));
-  }
   const playlists = () => state.playlists;
-  function selPl() { return playlists().byId[selectedId] || playlists().byId[playlists().rootId]; }
+  const selPl = () => playlists().byId[selectedId] || playlists().byId[playlists().rootId];
+  const isRoot = (pl) => pl.id === playlists().rootId;
 
-  function setIfNotFocused(el, value) {
-    if (!el || document.activeElement === el) return;
-    if (el.type === 'checkbox') el.checked = value;
-    else el.value = value;
-  }
+  // ---- Gemeinsame Kopf-/Fußzeile -----------------------------------------
+  U.topbarNav('playlists');
+  U.bindVolume();
+  // Veröffentlicht wird auf /programm (mit Vorschau + Slide-Bestätigung); die
+  // Leiste führt dorthin, damit es genau einen Weg auf die Wand gibt.
+  const draft = U.draftBar();
 
   // ---- WebSocket (Status + Live-Sync) ------------------------------------
-  let ws = null;
-  function connect() {
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    ws = new WebSocket(`${proto}://${location.host}/?role=control`);
-    ws.addEventListener('open', () => setConn(true));
-    ws.addEventListener('message', (ev) => {
-      try {
-        const msg = JSON.parse(ev.data);
-        if (msg.type === 'state') {
-          state = msg.state;
-          render();
-        } else if (msg.type === 'cmd' && msg.cmd === 'nowplaying') {
-          liveNowPlaying = msg;
-          applyLiveNow();
-        }
-      } catch (_) {}
-    });
-    ws.addEventListener('close', () => { setConn(false); setTimeout(connect, 1500); });
-    ws.addEventListener('error', () => ws.close());
-  }
-  function setConn(on) {
-    $('conn-dot').classList.toggle('on', on);
-    $('conn-text').textContent = on ? 'verbunden' : 'getrennt – verbinde neu…';
-  }
-  connect();
-  fetch('/api/state').then((r) => r.json()).then((s) => { state = s; render(); });
+  U.connectState({
+    onConn: U.bindConnDot(),
+    onDirty: (dirty) => draft.update({ dirty, show: dirty }),
+    onState: (s) => { state = s; render(); },
+    onCmd: (msg) => {
+      if (msg.cmd !== 'nowplaying') return;
+      liveNowPlaying = msg;
+      applyLiveNow();
+      if (!detailMode) renderOverview();   // Live-Abzeichen der Karten aktualisieren
+    }
+  });
+  U.api('GET', '/api/state', undefined, { quiet: true })
+    .then((s) => { state = s; render(); })
+    .catch(() => {});
+
   // Übersicht bei Größenänderung neu zeichnen (Zeitleisten füllen die Breite neu).
   let resizeTimer = null;
   window.addEventListener('resize', () => {
@@ -64,175 +54,288 @@
     resizeTimer = setTimeout(() => { if (state) renderOverview(); }, 150);
   });
   // Echte Video-/YouTube-Längen nachtragen, damit die Storyboard-Breiten stimmen.
-  fetch('/api/probe-durations', { method: 'POST' }).catch(() => {});
+  U.api('POST', '/api/probe-durations', undefined, { quiet: true }).catch(() => {});
 
   // ===== Playlist-Verwaltung ==============================================
-  // Neue Playlist anlegen -> direkt in die Detailansicht.
-  $('pl-new').addEventListener('click', async () => {
+  // EIN Dialog fragt alles ab, was eine neue Playlist braucht. Danach geht es
+  // direkt an die Inhalte – dieselben Felder werden nicht erneut abgefragt.
+  $('pl-new').addEventListener('click', () => {
     const n = Object.keys(playlists().byId).length + 1;
-    const name = prompt('Name der neuen Playlist:', `Playlist ${n}`);
-    if (name === null) return;
-    const pl = await api('POST', '/api/playlist', { name });
-    if (pl && pl.id) location.href = '/playlists?edit=' + pl.id;
+    const name = U.textInput(`Playlist ${n}`);
+    const desc = U.textInput('');
+    desc.placeholder = 'kurz beschreiben, was drin ist (optional)';
+    const after = U.selectInput([
+      ['loop', 'Wiederholen (Loop)'],
+      ['stop', 'Stoppen (Standbild)'],
+      ['next', 'Nächste Playlist abspielen']
+    ], 'loop');
+
+    const body = U.el('div', 'dlg-fields');
+    body.append(
+      U.field('Name', name),
+      U.field('Beschreibung', desc),
+      U.field('Wenn die Playlist endet', after),
+      U.el('p', 'hint', 'Inhalte kommen im nächsten Schritt dazu.')
+    );
+
+    U.dialog({
+      title: 'Neue Playlist',
+      body,
+      actions: [
+        { label: 'Abbrechen', cls: 'ghost', onClick: (h) => h.close() },
+        {
+          label: 'Anlegen',
+          onClick: async (h) => {
+            h.close();
+            try {
+              const pl = await U.api('POST', '/api/playlist', { name: name.value.trim() || `Playlist ${n}` });
+              if (!pl || !pl.id) return;
+              if (desc.value.trim()) {
+                await U.api('POST', `/api/playlist/${pl.id}/rename`, { description: desc.value.trim() });
+              }
+              if (after.value !== 'loop') {
+                await U.api('POST', `/api/playlist/${pl.id}/after`, { after: after.value, nextId: null });
+              }
+              location.href = '/playlists?edit=' + pl.id;
+            } catch (_) {}
+          }
+        }
+      ]
+    });
   });
 
-  // Detail-Kopf-Aktionen (Buttons liegen in #pl-detail, im Übersichtsmodus ausgeblendet).
-  $('pl-rename').addEventListener('click', async () => {
-    const pl = selPl();
-    if (!pl) return;
-    const name = prompt('Neuer Name:', pl.name);
-    if (name === null) return;
-    await api('POST', `/api/playlist/${pl.id}/rename`, { name });
-  });
+  // Umbenennen direkt im Titel: Eingabe speichert beim Verlassen/Enter.
+  const nameInput = $('pl-name');
+  if (nameInput) {
+    const commitName = () => {
+      const pl = selPl();
+      if (!pl) return;
+      const v = nameInput.value.trim();
+      if (!v || v === pl.name) { nameInput.value = pl.name; return; }
+      U.save('POST', `/api/playlist/${pl.id}/rename`, { name: v }).catch(() => { nameInput.value = pl.name; });
+    };
+    nameInput.addEventListener('change', commitName);
+    nameInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); nameInput.blur(); }
+      if (e.key === 'Escape') { nameInput.value = selPl().name; nameInput.blur(); }
+    });
+  }
+
   $('pl-desc').addEventListener('change', () => {
     const pl = selPl();
-    if (pl) api('POST', `/api/playlist/${pl.id}/rename`, { description: $('pl-desc').value });
-  });
-  $('pl-clone').addEventListener('click', async () => {
-    const pl = selPl();
-    if (!pl) return;
-    const copy = await api('POST', `/api/playlist/${pl.id}/clone`);
-    if (copy && copy.id) location.href = '/playlists?edit=' + copy.id;
-  });
-  $('pl-delete').addEventListener('click', async () => {
-    const pl = selPl();
-    if (!pl) return;
-    if (Object.keys(playlists().byId).length <= 1) { alert('Mindestens eine Playlist muss bestehen bleiben.'); return; }
-    if (!confirm(`Playlist „${pl.name}" mit allen Inhalten löschen?`)) return;
-    await api('DELETE', `/api/playlist/${pl.id}`);
-    location.href = '/playlists';
-  });
-  $('pl-setroot').addEventListener('click', async () => {
-    const pl = selPl();
-    if (pl) await api('POST', '/api/playlist/root', { id: pl.id });
+    if (pl) U.save('POST', `/api/playlist/${pl.id}/rename`, { description: $('pl-desc').value }).catch(() => {});
   });
 
+  const setRoot = (pl) => U.save('POST', '/api/playlist/root', { id: pl.id }).catch(() => {});
+
+  async function clonePlaylist(pl) {
+    try {
+      const copy = await U.api('POST', `/api/playlist/${pl.id}/clone`);
+      if (copy && copy.id) location.href = '/playlists?edit=' + copy.id;
+    } catch (_) {}
+  }
+
+  // Eine Löschfunktion für Karte UND Detailkopf (vorher zwei kopierte Blöcke).
+  // Der Fall "letzte Playlist" wird nicht mehr hinterher gemeldet, sondern der
+  // Menüpunkt ist von vornherein deaktiviert (siehe canDelete).
+  const canDelete = () => Object.keys(playlists().byId).length > 1;
+  async function deletePlaylist(pl, { backToOverview = false } = {}) {
+    if (!canDelete()) return;
+    const n = pl.items.length;
+    const was = n === 0 ? 'ohne Einträge' : n === 1 ? 'mit ihrem einen Eintrag' : `mit allen ${n} Einträgen`;
+    const ok = await U.confirmDialog({
+      title: 'Playlist löschen?',
+      text: `„${pl.name}" wird ${was} gelöscht. `
+        + 'Hochgeladene Dateien, die nirgends sonst verwendet werden, werden mit entfernt.',
+      confirmLabel: 'Löschen',
+      danger: true
+    });
+    if (!ok) return;
+    try {
+      await U.api('DELETE', `/api/playlist/${pl.id}`);
+      U.toast('Playlist gelöscht');
+      if (backToOverview) location.href = '/playlists';
+    } catch (_) {}
+  }
+
   // Nachfolge-Aktion
-  $('pl-after').addEventListener('change', () => sendAfter());
-  $('pl-next').addEventListener('change', () => sendAfter());
+  $('pl-after').addEventListener('change', sendAfter);
+  $('pl-next').addEventListener('change', sendAfter);
   function sendAfter() {
     const pl = selPl();
     if (!pl) return;
     const after = $('pl-after').value;
     const nextId = after === 'next' ? $('pl-next').value : null;
-    api('POST', `/api/playlist/${pl.id}/after`, { after, nextId });
+    U.save('POST', `/api/playlist/${pl.id}/after`, { after, nextId }).catch(() => {});
   }
 
-  // ===== Inhalte hinzufügen ===============================================
-  document.querySelectorAll('[data-add]').forEach((btn) => {
-    btn.addEventListener('click', () => addContentByType(btn.dataset.add));
-  });
-  $('pl-yt-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') addContentByType('youtube'); });
-  $('pl-web-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') addContentByType('webpage'); });
-  $('pl-ext-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') addContentByType('external'); });
+  // ===== Inhalt hinzufügen ================================================
+  // Ein Dialog in zwei Schritten: erst Typ-Kachel wählen, dann nur die Felder,
+  // die dieser Typ braucht. Ersetzt die alte Leiste aus 7 Schaltflächen,
+  // 3 Textfeldern, einer Checkbox und einer Auswahlliste.
+  $('pl-add').addEventListener('click', openAddDialog);
 
-  async function addItem(item) {
+  function openAddDialog() {
     const pl = selPl();
     if (!pl) return;
-    return api('POST', `/api/playlist/${pl.id}/items`, item);
+    const body = U.el('div');
+    const grid = U.el('div', 'type-grid');
+    body.appendChild(grid);
+
+    let dlg = null;
+    for (const t of CT.TYPES) {
+      const tile = U.el('button', 'type-tile');
+      tile.type = 'button';
+      tile.setAttribute('aria-pressed', 'false');
+      tile.append(
+        Object.assign(U.el('span', 'tt-badge', t.badge), { ariaHidden: 'true' }),
+        U.el('span', 'tt-label', t.label),
+        U.el('span', 'tt-hint', t.hint)
+      );
+      tile.addEventListener('click', () => { dlg.close(); openAddStep2(t, pl); });
+      grid.appendChild(tile);
+    }
+
+    dlg = U.dialog({
+      title: 'Inhalt hinzufügen',
+      body,
+      wide: true,
+      actions: [{ label: 'Abbrechen', cls: 'ghost', onClick: (h) => h.close() }]
+    });
   }
 
-  async function addContentByType(type) {
-    if (type === 'color') {
-      await addItem({ kind: 'content', content: { type: 'color', color: '#1e293b', name: 'Farbe', durationSec: 6 } });
-    } else if (type === 'youtube') {
-      const raw = $('pl-yt-input').value.trim();
-      if (!raw) return;
-      const id = parseYoutubeId(raw);
-      if (!id) { alert('Konnte keine YouTube-ID erkennen.'); return; }
-      $('pl-yt-input').value = '';
-      await addItem({ kind: 'content', content: { type: 'youtube', videoId: id, name: raw, muted: true, crop: false, videoMode: 'end' } });
-    } else if (type === 'webpage') {
-      const url = normalizeUrl($('pl-web-input').value.trim());
-      if (!url) { alert('Bitte eine gültige URL eingeben.'); return; }
-      $('pl-web-input').value = '';
-      const pl = selPl();
-      await api('POST', '/api/link', { url, playlistId: pl.id });
-    } else if (type === 'screenshare') {
-      const withAudio = confirm('Ton der Freigabe mitübertragen?\n\nOK = mit Ton, Abbrechen = ohne Ton');
-      await addItem({ kind: 'content', content: { type: 'screenshare', name: 'Bildschirm', withAudio, durationSec: 15 } });
-    } else if (type === 'external') {
-      const url = normalizeUrl($('pl-ext-input').value.trim());
-      if (!url) { alert('Bitte eine gültige URL eingeben.'); return; }
-      $('pl-ext-input').value = '';
-      await addItem({ kind: 'content', content: { type: 'external', url, name: 'Externer Inhalt', durationSec: 15 } });
-    } else if (type === 'playlist') {
-      const refId = $('pl-sub-select').value;
-      if (!refId) { alert('Keine Playlist zum Einbetten ausgewählt.'); return; }
-      const res = await addItem({ kind: 'playlist', refId });
-      if (res && res.error) alert(res.error);
-    }
+  function openAddStep2(type, pl) {
+    const ctx = {
+      playlistId: pl.id,
+      playlists: Object.values(playlists().byId),
+      uploadFiles
+    };
+    const form = CT.buildAddForm(type.type, ctx);
+
+    const body = U.el('div');
+    // Kopf mit gewähltem Typ + Erklärung: der Nutzer weiß, wo er ist und was der Typ tut.
+    const chosen = U.el('div', 'type-chosen');
+    const txt = U.el('div');
+    txt.append(U.el('div', 'tt-label', type.label), U.el('div', 'tt-hint', type.hint));
+    chosen.append(Object.assign(U.el('span', 'tt-badge', type.badge), { ariaHidden: 'true' }), txt);
+    body.append(chosen, form.node);
+
+    let busy = false;
+    U.dialog({
+      title: 'Inhalt hinzufügen',
+      body,
+      actions: [
+        { label: '← Zurück', cls: 'ghost', onClick: (h) => { h.close(); openAddDialog(); } },
+        { label: 'Abbrechen', cls: 'ghost', onClick: (h) => h.close() },
+        {
+          label: 'Hinzufügen',
+          onClick: async (h) => {
+            if (busy) return;
+            busy = true;
+            try {
+              await form.submit();
+              h.close();
+              U.toast('Hinzugefügt');
+            } catch (_) {
+              // Fehler stehen am Feld (Validierung) oder kamen schon als Toast.
+            }
+            busy = false;
+          }
+        }
+      ]
+    });
   }
 
   // Upload (Bild/Video) mit optionalem 18:16-Crop für Bilder.
-  $('pl-file').addEventListener('change', async (e) => {
-    const files = Array.from(e.target.files);
-    e.target.value = '';
-    const wantCrop = $('pl-crop-toggle').checked;
+  async function uploadFiles(files, wantCrop) {
     for (const file of files) {
       if (wantCrop && file.type.startsWith('image/')) await cropThenUpload(file);
       else await uploadFile(file);
     }
-  });
+  }
   async function uploadFile(fileOrBlob, filename) {
     const pl = selPl();
     if (!pl) return;
     const fd = new FormData();
     fd.append('playlistId', pl.id);
     fd.append('file', fileOrBlob, filename || fileOrBlob.name || 'upload');
-    await fetch('/api/upload', { method: 'POST', body: fd });
+    const r = await fetch('/api/upload', { method: 'POST', body: fd });
+    if (!r.ok) { U.toast('Upload fehlgeschlagen', 'err', 4000); throw new Error('upload'); }
   }
 
   // --- Crop-Dialog (Cropper.js, 18:16 = 9:8) ---
-  let cropper = null, cropResolve = null;
+  // Fehlt die CDN-Bibliothek (offline), wird das Original hochgeladen.
   function cropThenUpload(file) {
+    if (typeof window.Cropper !== 'function') {
+      U.toast('Zuschneiden nicht verfügbar (Bibliothek fehlt) – Original wird verwendet', 'err', 4500);
+      return uploadFile(file);
+    }
     return new Promise((resolve) => {
       const url = URL.createObjectURL(file);
-      const img = $('crop-img');
-      img.src = url;
-      $('crop-modal').classList.remove('hidden');
-      img.onload = () => {
+      const img = U.el('img');
+      img.alt = '';
+      const stage = U.el('div', 'crop-stage');
+      stage.appendChild(img);
+      const body = U.el('div');
+      body.append(U.el('p', 'modal-hint', `„${file.name}" auf 18:16 zuschneiden – Ausschnitt ziehen und bestätigen.`), stage);
+
+      let cropper = null;
+      const finish = async (useCrop, h) => {
+        h.close();
+        try {
+          if (useCrop && cropper) {
+            const canvas = cropper.getCroppedCanvas();
+            const blob = await new Promise((res) => canvas.toBlob(res, 'image/jpeg', 0.92));
+            await uploadFile(blob, (file.name.replace(/\.[^.]+$/, '') || 'bild') + '-18x16.jpg');
+          } else {
+            await uploadFile(file);
+          }
+        } catch (_) {}
         if (cropper) cropper.destroy();
-        cropper = new Cropper(img, { aspectRatio: 18 / 16, viewMode: 1, autoCropArea: 1 });
-      };
-      cropResolve = async (useCrop) => {
-        $('crop-modal').classList.add('hidden');
-        if (useCrop && cropper) {
-          const canvas = cropper.getCroppedCanvas();
-          const blob = await new Promise((res) => canvas.toBlob(res, 'image/jpeg', 0.92));
-          await uploadFile(blob, (file.name.replace(/\.[^.]+$/, '') || 'bild') + '-18x16.jpg');
-        } else {
-          await uploadFile(file);
-        }
-        if (cropper) { cropper.destroy(); cropper = null; }
         URL.revokeObjectURL(url);
         resolve();
       };
+
+      const h = U.dialog({
+        title: 'Auf 18:16 zuschneiden',
+        body,
+        wide: true,
+        actions: [
+          { label: 'Original verwenden', cls: 'ghost', onClick: (hh) => finish(false, hh) },
+          { label: 'Zuschneiden & hochladen', onClick: (hh) => finish(true, hh) }
+        ]
+      });
+      img.onload = () => { cropper = new window.Cropper(img, { aspectRatio: 18 / 16, viewMode: 1, autoCropArea: 1 }); };
+      img.src = url;
+      void h;
     });
   }
-  $('crop-confirm').addEventListener('click', () => cropResolve && cropResolve(true));
-  $('crop-cancel').addEventListener('click', () => cropResolve && cropResolve(false));
 
   // ===== Item-Operationen =================================================
   function patchContent(itemId, content) {
     const pl = selPl();
-    if (pl) api('PATCH', `/api/playlist/${pl.id}/items/${itemId}`, { content });
+    if (pl) U.save('PATCH', `/api/playlist/${pl.id}/items/${itemId}`, { content }).catch(() => {});
   }
-  function deleteItem(itemId) {
+  async function deleteItem(item) {
     const pl = selPl();
-    if (pl) api('DELETE', `/api/playlist/${pl.id}/items/${itemId}`);
+    if (!pl) return;
+    const what = item.kind === 'playlist'
+      ? `die eingebettete Playlist „${(playlists().byId[item.refId] || {}).name || '—'}"`
+      : `„${CT.displayName(item.content)}"`;
+    const ok = await U.confirmDialog({
+      title: 'Eintrag entfernen?',
+      text: `${what} wird aus dieser Playlist entfernt.`,
+      confirmLabel: 'Entfernen',
+      danger: true
+    });
+    if (ok) U.save('DELETE', `/api/playlist/${pl.id}/items/${item.id}`).catch(() => {});
   }
   function saveItemOrder(order) {
     const pl = selPl();
-    if (pl) api('POST', `/api/playlist/${pl.id}/items/order`, { order });
+    if (pl) U.save('POST', `/api/playlist/${pl.id}/items/order`, { order }).catch(() => {});
   }
 
   // ===== Rendering ========================================================
-  const TYPE_LABEL = {
-    color: 'Farbe', image: 'Bild', video: 'Video',
-    youtube: 'YouTube', webpage: 'Webseite', screenshare: 'Bildschirm', external: 'Externer Inhalt'
-  };
-
   function render() {
     if (!state) return;
     const pls = playlists();
@@ -246,10 +349,12 @@
     showMode(true);
     const pls = playlists();
     const pl = selPl();
-    $('pl-detail-name').textContent = pl.name;
-    setIfNotFocused($('pl-desc'), pl.description || '');
-    $('pl-root-badge').classList.toggle('hidden', pl.id !== pls.rootId);
-    $('pl-setroot').disabled = pl.id === pls.rootId;
+    document.title = `Screenwall – ${pl.name}`;
+    U.setIfNotFocused($('pl-name'), pl.name);
+    U.setIfNotFocused($('pl-desc'), pl.description || '');
+    $('pl-root-badge').classList.toggle('hidden', !isRoot(pl));
+
+    renderDetailActions(pl);
 
     // Nachfolge-Auswahl
     const next = $('pl-next');
@@ -257,38 +362,44 @@
       next.innerHTML = '';
       for (const p of Object.values(pls.byId)) {
         if (p.id === pl.id) continue;
-        const o = document.createElement('option');
-        o.value = p.id; o.textContent = p.name;
+        const o = U.el('option', null, p.name); o.value = p.id;
         next.appendChild(o);
       }
     }
-    setIfNotFocused($('pl-after'), pl.after);
+    U.setIfNotFocused($('pl-after'), pl.after);
     $('pl-next-wrap').classList.toggle('hidden', pl.after !== 'next');
     if (pl.nextId && document.activeElement !== next) next.value = pl.nextId;
 
-    // Einbettbare Sub-Playlists (alle außer der aktuellen)
-    const subSel = $('pl-sub-select');
-    if (document.activeElement !== subSel) {
-      subSel.innerHTML = '';
-      for (const p of Object.values(pls.byId)) {
-        if (p.id === pl.id) continue;
-        const o = document.createElement('option');
-        o.value = p.id; o.textContent = p.name;
-        subSel.appendChild(o);
-      }
-    }
-
     renderItems(pl);
+  }
+
+  // Zwei sichtbare Aktionen + ⋯-Menü – dieselbe Systematik wie auf den Karten.
+  function renderDetailActions(pl) {
+    const host = $('pl-detail-actions');
+    host.innerHTML = '';
+    if (!isRoot(pl)) {
+      host.appendChild(U.btn('▶ Abspielen', 'play', () => openPlayConfirm(pl)));
+      host.appendChild(U.btn('★ Als Start setzen', 'ghost', () => setRoot(pl)));
+    }
+    host.appendChild(U.overflowMenu([
+      { label: '⧉ Klonen', onClick: () => clonePlaylist(pl) },
+      {
+        label: '🗑 Löschen',
+        danger: true,
+        disabled: !canDelete(),
+        title: canDelete() ? '' : 'Mindestens eine Playlist muss bestehen bleiben.',
+        onClick: () => deletePlaylist(pl, { backToOverview: true })
+      }
+    ], { label: `Weitere Aktionen für „${pl.name}"` }));
   }
 
   // ----- Übersicht: alle Playlists als Karten mit Storyboard ---------------
   function renderOverview() {
     showMode(false);
-    const pls = playlists();
     const cards = $('pl-cards');
     cards.innerHTML = '';
     const avail = storyboardWidth();
-    for (const pl of Object.values(pls.byId)) cards.appendChild(buildPlaylistCard(pl, pl.id === pls.rootId, avail));
+    for (const pl of Object.values(playlists().byId)) cards.appendChild(buildPlaylistCard(pl, avail));
   }
 
   // Innenbreite, die einer Storyboard-Zeitleiste zur Verfügung steht: Kartenbreite
@@ -298,118 +409,96 @@
     return Math.max(160, w - 40);
   }
 
-  function buildPlaylistCard(pl, active, avail) {
-    const card = document.createElement('div');
-    card.className = 'pl-card' + (active ? ' active' : '');
+  // Läuft gerade ein Inhalt DIESER Playlist auf der Wand? (Rot = live, nur dafür.)
+  function isLive(pl) {
+    const cid = liveNowPlaying && liveNowPlaying.contentId;
+    if (!cid) return false;
+    return CT.flatten(pl.id, playlists().byId).some((e) => e.itemId === cid);
+  }
 
-    const head = document.createElement('div');
-    head.className = 'pl-card-head';
-    const title = document.createElement('div');
-    title.className = 'pl-card-title';
-    title.innerHTML = `<span class="pl-card-name">${escapeHtml(pl.name)}</span>` + (active ? ' <span class="pl-card-live">● Aktiv</span>' : '');
-    const seq = flatten(pl.id, playlists().byId, new Set());
-    const total = seq.reduce((a, e) => a + blockDur(e.itemId, e.content), 0);
-    const meta = document.createElement('div');
-    meta.className = 'pl-card-meta';
-    meta.textContent = `${seq.length} Inhalte · ${fmtClock(total)}`;
+  function buildPlaylistCard(pl, avail) {
+    const start = isRoot(pl), live = isLive(pl);
+    const card = U.el('div', 'pl-card' + (start ? ' is-start' : '') + (live ? ' is-live' : ''));
+
+    const head = U.el('div', 'pl-card-head');
+    const title = U.el('div', 'pl-card-title');
+    title.appendChild(U.el('span', 'pl-card-name', pl.name));
+    // Zwei verschiedene Dinge, zwei Abzeichen: "Start" beginnt die Übertragung,
+    // "Live" heißt, dass daraus JETZT etwas auf der Wand läuft.
+    if (start) title.appendChild(U.el('span', 'badge start', '★ Start'));
+    if (live) title.appendChild(U.el('span', 'badge live', '● Live'));
+
+    const seq = CT.flatten(pl.id, playlists().byId);
+    const total = seq.reduce((a, e) => a + CT.blockDur(e.itemId, e.content), 0);
+    const meta = U.el('div', 'pl-card-meta', `${seq.length} Inhalte · ${fmtClock(total)}`);
     head.append(title, meta);
     card.appendChild(head);
-    if (pl.description) {
-      const desc = document.createElement('div');
-      desc.className = 'pl-card-desc'; desc.textContent = pl.description;
-      card.appendChild(desc);
-    }
+
+    if (pl.description) card.appendChild(U.el('div', 'pl-card-desc', pl.description));
 
     // px pro Sekunde, sodass die Playlist genau die Kartenbreite füllt.
-    const pps = total > 0 ? avail / total : 0;
-    card.appendChild(buildStoryboard(seq, pps));
+    card.appendChild(buildStoryboard(seq, total > 0 ? avail / total : 0));
 
-    const acts = document.createElement('div');
-    acts.className = 'pl-card-acts';
-    // Sofort abspielen (nur für nicht-aktive Playlists): öffnet die Slide-to-Play-
-    // Bestätigung; bestätigt schaltet sie live (siehe openPlayConfirm).
-    if (!active) {
-      const play = document.createElement('button');
-      play.className = 'btn play'; play.textContent = '▶ Abspielen';
+    // Zwei sichtbare Aktionen, alles Weitere im ⋯-Menü.
+    const acts = U.el('div', 'pl-card-acts');
+    if (!start) {
+      const play = U.btn('▶ Abspielen', 'play', () => openPlayConfirm(pl));
       play.title = 'Diese Playlist sofort live auf die Wand schalten';
-      play.addEventListener('click', () => openPlayConfirm(pl));
       acts.appendChild(play);
     }
-    const view = document.createElement('button');
-    view.className = 'btn'; view.textContent = 'View more →';
-    view.addEventListener('click', () => { location.href = '/playlists?edit=' + pl.id; });
-    acts.appendChild(view);
-    if (!active) {
-      const setr = document.createElement('button');
-      setr.className = 'btn ghost'; setr.textContent = '★ Aktiv setzen';
-      setr.addEventListener('click', () => api('POST', '/api/playlist/root', { id: pl.id }));
-      acts.appendChild(setr);
-    }
-    const clone = document.createElement('button');
-    clone.className = 'btn ghost'; clone.textContent = 'Klonen';
-    clone.addEventListener('click', async () => { const c = await api('POST', `/api/playlist/${pl.id}/clone`); if (c && c.id) location.href = '/playlists?edit=' + c.id; });
-    acts.appendChild(clone);
-    const del = document.createElement('button');
-    del.className = 'btn ghost'; del.textContent = 'Löschen';
-    del.addEventListener('click', async () => {
-      if (Object.keys(playlists().byId).length <= 1) { alert('Mindestens eine Playlist muss bestehen bleiben.'); return; }
-      if (!confirm(`Playlist „${pl.name}" mit allen Inhalten löschen?`)) return;
-      await api('DELETE', `/api/playlist/${pl.id}`);
-    });
-    acts.appendChild(del);
+    acts.appendChild(U.btn('Bearbeiten', '', () => { location.href = '/playlists?edit=' + pl.id; }));
+    acts.appendChild(U.overflowMenu([
+      {
+        label: '★ Als Start setzen',
+        disabled: start,
+        title: start ? 'Diese Playlist startet die Übertragung bereits.' : '',
+        onClick: () => setRoot(pl)
+      },
+      { label: '⧉ Klonen', onClick: () => clonePlaylist(pl) },
+      'sep',
+      {
+        label: '🗑 Löschen',
+        danger: true,
+        disabled: !canDelete(),
+        title: canDelete() ? '' : 'Mindestens eine Playlist muss bestehen bleiben.',
+        onClick: () => deletePlaylist(pl)
+      }
+    ], { label: `Weitere Aktionen für „${pl.name}"` }));
     card.appendChild(acts);
     return card;
   }
 
   // ----- Storyboard (kompakte Mini-Timeline; Filmstreifen je Video) --------
-  const NOMINAL_END = 30, THUMB_PX = 90, MAXF = 24;
-  const TYPE_BADGE = { color: '🎨', image: '🖼', video: '🎬', youtube: '▶', webpage: '🌐', screenshare: '🖥', external: '📺' };
-  const measured = {}; // hier ungenutzt; Dauern kommen aus videoDuration (Server-Probe)
-
-  function flatten(plId, byId, visited) {
-    const pl = byId[plId];
-    if (!pl || visited.has(plId)) return [];
-    const v = new Set(visited); v.add(plId);
-    const out = [];
-    for (const it of pl.items) {
-      if (it.kind === 'content') out.push({ itemId: it.id, content: it.content });
-      else if (it.kind === 'playlist') out.push(...flatten(it.refId, byId, v));
-    }
-    return out;
-  }
-  function blockDur(itemId, c) {
-    if ((c.type === 'video' || c.type === 'youtube') && c.videoMode !== 'duration') return c.videoDuration || measured[itemId] || NOMINAL_END;
-    return Math.max(1, c.durationSec || 6);
-  }
+  const SB_OPT = { stripCls: 'pl-fs', frameCls: 'pl-fr', thumbPx: 90, maxFrames: 24 };
+  const YT_SB_OPT = { ...SB_OPT, frameCls: 'pl-fr sb' };
 
   // Volle-Breite-Zeitleiste: Blockbreite proportional zur Dauer (pps = px/Sekunde,
   // vom Aufrufer so gewählt, dass die ganze Playlist die Kartenbreite füllt).
   function buildStoryboard(seq, pps) {
-    const strip = document.createElement('div');
-    strip.className = 'pl-storyboard';
+    const strip = U.el('div', 'pl-storyboard');
     if (!seq.length) { strip.classList.add('empty'); strip.textContent = 'Noch keine Inhalte'; return strip; }
     for (const e of seq) {
       const c = e.content;
-      const dur = blockDur(e.itemId, c);
+      const dur = CT.blockDur(e.itemId, c);
       const w = Math.max(2, dur * pps);
-      const block = document.createElement('div');
-      block.className = 'pl-sb-block type-' + c.type;
+      const block = U.el('div', 'pl-sb-block type-' + c.type);
       block.style.width = w + 'px';
       if (c.type === 'color') block.style.background = c.color || '#000';
       else if (c.type === 'image') block.style.backgroundImage = `url('/uploads/${c.filename}')`;
       else if (c.type === 'youtube') {
         block.style.backgroundImage = `url('https://i.ytimg.com/vi/${c.videoId}/mqdefault.jpg')`;
-        const sb = ytStoryboard(c.videoId);
-        if (sb) block.appendChild(buildYtFilmstrip(sb, dur, pps));
-      } else if (c.type === 'video' && c.filename) block.appendChild(buildFilmstrip(c.filename, dur, pps));
-      const badge = document.createElement('span'); badge.className = 'pl-sb-badge'; badge.textContent = TYPE_BADGE[c.type] || '•';
+        const sb = CT.ytStoryboard(c.videoId, () => { if (!detailMode) renderOverview(); });
+        if (sb) block.appendChild(CT.buildYtFilmstrip(sb, dur, pps, YT_SB_OPT));
+      } else if (c.type === 'video' && c.filename) {
+        block.appendChild(CT.buildFilmstrip(c.filename, dur, pps, SB_OPT));
+      }
+      const badge = U.el('span', 'pl-sb-badge', CT.badge(c.type));
+      badge.title = CT.label(c.type);
       block.appendChild(badge);
-      // Name + Dauer (wie im Scrubboard) – nur zeigen, wenn der Block breit genug ist.
+      // Name + Dauer – nur zeigen, wenn der Block breit genug ist.
       if (w >= 48) {
-        const label = document.createElement('div');
-        label.className = 'pl-sb-label';
-        const name = c.name || TYPE_LABEL[c.type] || c.type;
-        label.innerHTML = `${escapeHtml(name)} <span class="pl-sb-dur">${fmtClock(dur)}</span>`;
+        const label = U.el('div', 'pl-sb-label');
+        label.innerHTML = `${escapeHtml(CT.displayName(c))} <span class="pl-sb-dur">${fmtClock(dur)}</span>`;
         block.appendChild(label);
       }
       strip.appendChild(block);
@@ -417,57 +506,7 @@
     return strip;
   }
 
-  // Filmstreifen aus Video-Keyframes (Upload via /api/frame).
-  function buildFilmstrip(filename, dur, pps) {
-    dur = dur || 0;
-    const strip = document.createElement('div'); strip.className = 'pl-fs';
-    const nice = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800, 3600];
-    let G = nice.find((n) => n >= THUMB_PX / Math.max(0.0001, pps)) || 3600;
-    if (Math.ceil(dur / G) > MAXF) G = dur / MAXF;
-    for (let t = 0; t < dur - 0.01; t += G) {
-      const w = Math.min(G, dur - t);
-      const img = document.createElement('img'); img.className = 'pl-fr'; img.loading = 'lazy'; img.alt = '';
-      img.style.left = (t * pps) + 'px'; img.style.width = (w * pps) + 'px';
-      img.src = `/api/frame?file=${encodeURIComponent(filename)}&t=${Math.round(t + w / 2)}`;
-      strip.appendChild(img);
-    }
-    return strip;
-  }
-  // YouTube-Filmstreifen aus dem Storyboard (Sprite-Kacheln per CSS-Hintergrund).
-  const ytSb = {};
-  function ytStoryboard(videoId) {
-    if (!videoId) return null;
-    if (videoId in ytSb) return ytSb[videoId] === 'pending' ? null : ytSb[videoId];
-    ytSb[videoId] = 'pending';
-    fetch(`/api/yt-storyboard?id=${encodeURIComponent(videoId)}`)
-      .then((r) => r.json()).then((d) => { ytSb[videoId] = (d && d.ok) ? d : null; if (d && d.ok && !detailMode) renderOverview(); })
-      .catch(() => { ytSb[videoId] = null; });
-    return null;
-  }
-  function buildYtFilmstrip(sb, dur, pps) {
-    dur = Math.max(0, dur || sb.duration || 0);
-    const strip = document.createElement('div'); strip.className = 'pl-fs';
-    const effInt = sb.intervalMs > 0 ? sb.intervalMs / 1000 : (sb.duration / Math.max(1, sb.frames));
-    const nice = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800, 3600];
-    let G = nice.find((n) => n >= THUMB_PX / Math.max(0.0001, pps)) || 3600;
-    G = Math.max(G, effInt);
-    if (Math.ceil(dur / G) > MAXF) G = dur / MAXF;
-    for (let t = 0; t < dur - 0.01; t += G) {
-      const w = Math.min(G, dur - t);
-      const fi = Math.min(sb.frames - 1, Math.max(0, Math.floor((t + w / 2) / effInt)));
-      const sheet = Math.floor(fi / (sb.cols * sb.rows));
-      const pos = fi % (sb.cols * sb.rows);
-      const col = pos % sb.cols, row = Math.floor(pos / sb.cols);
-      const cell = document.createElement('div'); cell.className = 'pl-fr sb';
-      cell.style.left = (t * pps) + 'px'; cell.style.width = (w * pps) + 'px';
-      cell.style.backgroundImage = `url('${sb.sheets[sheet]}')`;
-      cell.style.backgroundSize = `${sb.cols * 100}% ${sb.rows * 100}%`;
-      cell.style.backgroundPosition = `${sb.cols > 1 ? (col / (sb.cols - 1)) * 100 : 0}% ${sb.rows > 1 ? (row / (sb.rows - 1)) * 100 : 0}%`;
-      strip.appendChild(cell);
-    }
-    return strip;
-  }
-
+  // ----- Einträge der Playlist --------------------------------------------
   function renderItems(pl) {
     const ul = $('pl-items');
     ul.innerHTML = '';
@@ -477,203 +516,106 @@
   }
 
   function buildItemEl(item) {
-    const li = document.createElement('li');
-    li.className = 'media-item';
+    const li = U.el('li', 'media-item');
     li.draggable = true;
     li.dataset.id = item.id;
 
-    const drag = document.createElement('span');
-    drag.className = 'drag'; drag.textContent = '⠿';
+    const drag = U.el('span', 'drag', '⠿');
+    drag.setAttribute('aria-hidden', 'true');
     li.appendChild(drag);
 
     if (item.kind === 'playlist') {
       const ref = playlists().byId[item.refId];
       li.classList.add('item-playlist');
-      const meta = document.createElement('span');
-      meta.className = 'meta';
+      const meta = U.el('span', 'meta');
       meta.innerHTML = `<div class="name">▶ Playlist: ${escapeHtml(ref ? ref.name : '—')}</div>
-        <div class="type">eingebettete Playlist${ref ? ` (${ref.items.length})` : ''}</div>`;
+        <div class="type">eingebettete Playlist${ref ? ` (${ref.items.length} Inhalte)` : ''}</div>`;
+      if (ref) {
+        const open = U.btn('Öffnen', 'ghost tiny', () => { location.href = '/playlists?edit=' + ref.id; });
+        const ctrls = U.el('div', 'content-ctrls');
+        ctrls.appendChild(open);
+        meta.appendChild(ctrls);
+      }
       li.appendChild(meta);
     } else {
       const c = item.content;
       if (c.type === 'youtube') li.dataset.videoId = c.videoId || '';
       li.appendChild(buildThumb(c));
-      li.appendChild(buildContentControls(item));
+      li.appendChild(buildMeta(item));
     }
 
-    const del = document.createElement('button');
-    del.className = 'del'; del.title = 'Entfernen'; del.textContent = '🗑';
-    del.addEventListener('click', () => deleteItem(item.id));
-    li.appendChild(del);
+    li.appendChild(U.iconBtn('🗑', item.kind === 'playlist'
+      ? 'Eingebettete Playlist entfernen'
+      : `„${CT.displayName(item.content)}" entfernen`, 'del', () => deleteItem(item)));
     return li;
   }
 
   function buildThumb(c) {
     if (c.type === 'color') {
-      const sw = document.createElement('span');
-      sw.className = 'thumb color-swatch';
+      const sw = U.el('span', 'thumb color-swatch');
       sw.style.background = c.color || '#000';
       return sw;
     }
     if (c.type === 'image') {
-      const img = document.createElement('img');
-      img.className = 'thumb'; img.src = `/uploads/${c.filename}`; img.alt = '';
+      const img = U.el('img', 'thumb');
+      img.src = `/uploads/${c.filename}`; img.alt = '';
       return img;
     }
     if (c.type === 'video') {
-      const v = document.createElement('video');
-      v.className = 'thumb'; v.src = `/uploads/${c.filename}`; v.muted = true;
+      const v = U.el('video', 'thumb');
+      v.src = `/uploads/${c.filename}`; v.muted = true;
       return v;
     }
     if (c.type === 'youtube') {
-      const img = document.createElement('img');
-      img.className = 'thumb'; img.src = `https://i.ytimg.com/vi/${c.videoId}/default.jpg`; img.alt = '';
+      const img = U.el('img', 'thumb');
+      img.src = `https://i.ytimg.com/vi/${c.videoId}/default.jpg`; img.alt = '';
       return img;
     }
-    const badge = document.createElement('span');
-    badge.className = 'thumb type-badge';
-    badge.textContent = TYPE_BADGE[c.type] || '🖥';
+    const badge = U.el('span', 'thumb type-badge', CT.badge(c.type));
+    badge.title = CT.label(c.type);
     return badge;
   }
 
-  // Typ-spezifische Bearbeitungs-Steuerung pro Content.
-  function buildContentControls(item) {
+  // Name, Typ und die typspezifischen Felder – die Felder selbst kommen aus dem
+  // Content-Typ-Register, damit alle Typen dieselbe Reihenfolge haben.
+  function buildMeta(item) {
     const c = item.content;
-    const meta = document.createElement('span');
-    meta.className = 'meta';
+    const meta = U.el('span', 'meta');
 
-    const name = document.createElement('div');
-    name.className = 'name';
+    const name = U.el('div', 'name');
     if (c.type === 'webpage' || c.type === 'external') {
-      const a = document.createElement('a');
-      a.href = c.url; a.target = '_blank'; a.rel = 'noopener'; a.textContent = c.url || '(URL)';
+      const a = U.el('a', null, c.name || c.url || '(Adresse)');
+      a.href = c.url; a.target = '_blank'; a.rel = 'noopener';
       name.appendChild(a);
     } else if (c.type === 'youtube') {
-      const a = document.createElement('a');
+      const a = U.el('a', null, c.name || c.videoId);
       a.href = `https://www.youtube.com/watch?v=${c.videoId}`; a.target = '_blank'; a.rel = 'noopener';
-      a.textContent = c.name || c.videoId;
       name.appendChild(a);
     } else {
-      name.textContent = c.name || TYPE_LABEL[c.type] || c.type;
+      name.textContent = CT.displayName(c);
     }
     meta.appendChild(name);
+    meta.appendChild(U.el('div', 'type', CT.label(c.type)));
 
-    const type = document.createElement('div');
-    type.className = 'type'; type.textContent = TYPE_LABEL[c.type] || c.type;
-    meta.appendChild(type);
-
-    const ctrls = document.createElement('div');
-    ctrls.className = 'content-ctrls';
-
-    if (c.type === 'color') {
-      ctrls.appendChild(field('Farbe', inputColor(c.color || '#000000', (v) => patchContent(item.id, { color: v }))));
-      ctrls.appendChild(field('Dauer (s)', inputNum(c.durationSec, 1, 600, (v) => patchContent(item.id, { durationSec: v }))));
-    } else if (c.type === 'image') {
-      ctrls.appendChild(field('Dauer (s)', inputNum(c.durationSec, 1, 600, (v) => patchContent(item.id, { durationSec: v }))));
-      ctrls.appendChild(checkbox('Zuschneiden (Cover)', c.crop, (v) => patchContent(item.id, { crop: v })));
-    } else if (c.type === 'video' || c.type === 'youtube') {
-      ctrls.appendChild(field('Ende', selectEl(
-        [['end', 'bis Videoende'], ['duration', 'nach Dauer']], c.videoMode || 'end',
-        (v) => patchContent(item.id, { videoMode: v }))));
-      if (c.videoMode === 'duration') {
-        ctrls.appendChild(field('Dauer (s)', inputNum(c.durationSec, 1, 6000, (v) => patchContent(item.id, { durationSec: v }))));
-      }
-      ctrls.appendChild(checkbox('Stumm', c.muted !== false, (v) => patchContent(item.id, { muted: v })));
-      ctrls.appendChild(checkbox('Zuschneiden', c.crop, (v) => patchContent(item.id, { crop: v })));
-      if (c.type === 'youtube') {
-        const now = document.createElement('div');
-        now.className = 'yt-now hidden';
-        now.innerHTML = `<span class="yt-badge">▶ läuft</span>
-          <div class="yt-progress"><div class="yt-progress-bar"></div></div>
-          <span class="yt-time">–</span>`;
-        meta.appendChild(now);
-      }
-    } else if (c.type === 'webpage') {
-      ctrls.appendChild(field('Dauer (s)', inputNum(c.durationSec, 3, 6000, (v) => patchContent(item.id, { durationSec: v }))));
-      const status = document.createElement('span');
-      status.className = 'embed-status';
-      if (c.embeddable === false) { status.classList.add('link-bad'); status.title = c.reason || ''; status.textContent = '⚠ blockiert'; }
-      else if (c.embeddable === true) { status.classList.add('link-ok'); status.textContent = '✓ einbettbar'; }
-      else { status.classList.add('link-unknown'); status.textContent = '? ungeprüft'; }
-      ctrls.appendChild(status);
-      const recheck = document.createElement('button');
-      recheck.className = 'btn ghost tiny'; recheck.textContent = 'neu prüfen';
-      recheck.addEventListener('click', () => api('POST', '/api/link/recheck', { playlistId: selPl().id, itemId: item.id }));
-      ctrls.appendChild(recheck);
-    } else if (c.type === 'screenshare') {
-      ctrls.appendChild(checkbox('Ton übertragen', c.withAudio, (v) => patchContent(item.id, { withAudio: v })));
-      const hint = document.createElement('span');
-      hint.className = 'link-unknown';
-      hint.textContent = c.sessionId
-        ? 'Link/QR erscheinen auf der Wall, sobald der Block live ist.'
-        : 'Erst „Live schalten“, dann erscheint der Teil-Link auf der Wall.';
-      ctrls.appendChild(hint);
-    } else if (c.type === 'external') {
-      ctrls.appendChild(field('Name', inputText(c.name || '', (v) => patchContent(item.id, { name: v }))));
-      ctrls.appendChild(field('URL', inputText(c.url || '', (v) => patchContent(item.id, { url: v }))));
-      ctrls.appendChild(field('Dauer (s)', inputNum(c.durationSec, 3, 6000, (v) => patchContent(item.id, { durationSec: v }))));
-      const hint = document.createElement('span');
-      hint.className = 'link-unknown';
-      hint.textContent = 'Öffnet als natives Vollbild-Fenster auf dem Anzeige-PC (Bezahldienste: dort einmalig anmelden).';
-      ctrls.appendChild(hint);
+    // Live-Fortschritt (wird von applyLiveNow gefüllt) – für alle zeitbasierten Typen.
+    if (c.type === 'youtube' || c.type === 'video') {
+      const now = U.el('div', 'yt-now hidden');
+      now.innerHTML = `<span class="yt-badge">▶ läuft</span>
+        <div class="yt-progress"><div class="yt-progress-bar"></div></div>
+        <span class="yt-time">–</span>`;
+      meta.appendChild(now);
     }
 
+    const ctrls = U.el('div', 'content-ctrls');
+    for (const node of CT.itemControls(item, {
+      patch: (fields) => patchContent(item.id, fields),
+      recheck: () => U.save('POST', '/api/link/recheck', { playlistId: selPl().id, itemId: item.id }).catch(() => {})
+    })) ctrls.appendChild(node);
     meta.appendChild(ctrls);
     return meta;
   }
 
-  // --- kleine Form-Bausteine ---
-  function field(label, el) {
-    const wrap = document.createElement('label');
-    wrap.className = 'ctrl';
-    wrap.appendChild(document.createTextNode(label + ' '));
-    wrap.appendChild(el);
-    return wrap;
-  }
-  function inputNum(value, min, max, onChange) {
-    const i = document.createElement('input');
-    i.type = 'number'; i.min = min; i.max = max; i.step = 1; i.value = value;
-    i.addEventListener('change', () => onChange(Math.max(min, Math.min(max, Number(i.value) || min))));
-    return i;
-  }
-  function inputColor(value, onChange) {
-    const i = document.createElement('input');
-    i.type = 'color'; i.value = value;
-    i.addEventListener('change', () => onChange(i.value));
-    return i;
-  }
-  function inputText(value, onChange) {
-    const i = document.createElement('input');
-    i.type = 'text'; i.value = value || '';
-    i.addEventListener('change', () => onChange(i.value.trim()));
-    return i;
-  }
-  function selectEl(options, value, onChange) {
-    const s = document.createElement('select');
-    for (const [v, label] of options) {
-      const o = document.createElement('option'); o.value = v; o.textContent = label;
-      s.appendChild(o);
-    }
-    s.value = value;
-    s.addEventListener('change', () => onChange(s.value));
-    return s;
-  }
-  function checkbox(label, checked, onChange) {
-    const wrap = document.createElement('label');
-    wrap.className = 'ctrl checkbox';
-    const i = document.createElement('input');
-    i.type = 'checkbox'; i.checked = !!checked;
-    i.addEventListener('change', () => onChange(i.checked));
-    wrap.appendChild(i);
-    wrap.appendChild(document.createTextNode(' ' + label));
-    return wrap;
-  }
-
   // ===== Live-Hervorhebung (roter Rahmen für den Wand-Content) ============
-  function fmtClock(s) {
-    s = Math.max(0, Math.floor(s || 0));
-    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-  }
   function applyLiveNow() {
     const np = liveNowPlaying;
     const ul = $('pl-items');
@@ -692,40 +634,6 @@
       }
     }
   }
-
-  // ===== Systemlautstärke =================================================
-  const volRange = $('vol-range'), volVal = $('vol-val'), volMute = $('vol-mute');
-  let lastVolSent = 0;
-  function renderVol(d) {
-    if (d && typeof d.level === 'number') {
-      const pct = Math.round(d.level * 100);
-      if (document.activeElement !== volRange) volRange.value = pct;
-      volVal.textContent = pct + '%';
-    } else { volVal.textContent = '–'; }
-    if (d && d.muted !== undefined) volMute.textContent = d.muted ? '🔇' : '🔊';
-  }
-  async function loadVol() {
-    try {
-      const r = await fetch('/api/volume');
-      if (!r.ok) throw new Error();
-      renderVol(await r.json());
-    } catch (_) { volVal.textContent = '–'; volRange.disabled = true; }
-  }
-  async function postVol(payload) {
-    try {
-      const r = await fetch('/api/volume', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-      if (r.ok) renderVol(await r.json());
-    } catch (_) {}
-  }
-  volRange.addEventListener('input', () => {
-    const pct = Number(volRange.value);
-    volVal.textContent = pct + '%';
-    const now = Date.now();
-    if (now - lastVolSent > 120) { postVol({ level: pct / 100 }); lastVolSent = now; }
-  });
-  volRange.addEventListener('change', () => postVol({ level: Number(volRange.value) / 100 }));
-  volMute.addEventListener('click', () => postVol({ mute: 'toggle' }));
-  loadVol();
 
   // ===== Drag & Drop Reorder ==============================================
   function enableDragReorder(container, onDrop) {
@@ -753,93 +661,27 @@
     return closest.el;
   }
 
-  // ===== Utils ============================================================
-  function parseYoutubeId(input) {
-    if (/^[\w-]{11}$/.test(input)) return input;
-    try {
-      const u = new URL(input);
-      if (u.hostname.includes('youtu.be')) return u.pathname.slice(1, 12) || null;
-      if (u.searchParams.get('v')) return u.searchParams.get('v');
-      const m = u.pathname.match(/\/(embed|shorts|v)\/([\w-]{11})/);
-      if (m) return m[2];
-    } catch (_) {}
-    const m = input.match(/[\w-]{11}/);
-    return m ? m[0] : null;
-  }
-  function normalizeUrl(input) {
-    if (!input) return null;
-    let s = input;
-    if (!/^https?:\/\//i.test(s)) s = 'https://' + s;
-    try {
-      const u = new URL(s);
-      if (!u.hostname.includes('.')) return null;
-      return u.href;
-    } catch (_) { return null; }
-  }
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, (c) =>
-      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  }
-
   // ===== Slide-to-Play: Playlist sofort live abspielen ====================
-  // Bestätigungs-Dialog mit Schiebe-Geste (wie „Slide to go live" auf /programm).
-  // Bestätigt ruft /api/play auf -> Playlist wird Root und sofort veröffentlicht.
-  let playPlId = null;
+  // Bewusst mit Schiebe-Geste bestätigt (wie „Slide to go live"), weil die Wand
+  // sofort umschaltet – ohne Entwurf und ohne Go Live.
   function openPlayConfirm(pl) {
-    playPlId = pl.id;
-    $('play-pl-name').textContent = pl.name;
-    resetSlide();
-    $('play-modal').classList.remove('hidden');
-  }
-  function closePlayConfirm() {
-    $('play-modal').classList.add('hidden');
-    playPlId = null;
-  }
-  $('play-cancel').addEventListener('click', closePlayConfirm);
-  $('play-modal').addEventListener('click', (e) => { if (e.target === $('play-modal')) closePlayConfirm(); });
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !$('play-modal').classList.contains('hidden')) closePlayConfirm();
-  });
+    const body = U.el('div');
+    body.appendChild(U.el('p', 'modal-hint',
+      `Ersetzt sofort den Inhalt auf der Wand und macht „${pl.name}" zur Start-Playlist.`));
+    const slider = U.buildSlide({ label: 'Zum Abspielen schieben →', glyph: '▶' });
+    body.appendChild(slider);
 
-  let slideX = 0, sliding = false, slideDone = false;
-  function slideTravel() { return $('play-slider').clientWidth - $('play-slide-handle').offsetWidth - 8; }
-  function setSlide(x) {
-    const max = slideTravel();
-    slideX = Math.max(0, Math.min(max, x));
-    $('play-slide-handle').style.transform = `translateX(${slideX}px)`;
-    $('play-slide-fill').style.width = `${slideX + $('play-slide-handle').offsetWidth}px`;
-  }
-  function resetSlide() {
-    slideDone = false; sliding = false;
-    $('play-slide-handle').style.transition = '';
-    setSlide(0);
-  }
-  async function firePlay() {
-    if (slideDone || !playPlId) return;
-    slideDone = true;
-    setSlide(slideTravel());
-    const id = playPlId;
-    await api('POST', '/api/play', { playlistId: id });
-    closePlayConfirm();
-  }
-  (function bindSlide() {
-    const handle = $('play-slide-handle');
-    let startX = 0, startSlide = 0;
-    handle.addEventListener('pointerdown', (e) => {
-      if (slideDone) return;
-      sliding = true; startX = e.clientX; startSlide = slideX;
-      handle.style.transition = 'none';
-      handle.setPointerCapture(e.pointerId);
+    const h = U.dialog({
+      title: `„${pl.name}" sofort live abspielen?`,
+      body,
+      actions: [{ label: 'Abbrechen', cls: 'ghost', onClick: (hh) => hh.close() }]
     });
-    handle.addEventListener('pointermove', (e) => { if (sliding) setSlide(startSlide + (e.clientX - startX)); });
-    const end = () => {
-      if (!sliding) return;
-      sliding = false;
-      handle.style.transition = 'transform 0.2s ease';
-      if (slideX >= slideTravel() * 0.95) firePlay();
-      else setSlide(0);
-    };
-    handle.addEventListener('pointerup', end);
-    handle.addEventListener('pointercancel', end);
-  })();
+    U.bindSlide(slider, async (reset) => {
+      try {
+        await U.api('POST', '/api/play', { playlistId: pl.id });
+        U.toast(`Live: ${pl.name}`);
+        h.close();
+      } catch (_) { reset(); }
+    });
+  }
 })();

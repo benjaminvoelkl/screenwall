@@ -4,18 +4,22 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Screenwall – Playlists</title>
-  <!-- Cropper.js für optionalen 18:16-Zuschnitt (CDN). -->
+  <!-- Cropper.js für den optionalen 18:16-Zuschnitt (CDN; fehlt es, wird das
+       Original hochgeladen – siehe cropThenUpload in playlists.js). -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.css" />
+  <link rel="stylesheet" href="/css/base.css" />
   <link rel="stylesheet" href="/css/control.css" />
 </head>
 <body>
+  <!-- Kopfzeile wie auf allen Steuer-Seiten: Marke, eine Hauptnavigation und die
+       Entwurfs-Leiste, die auf unveröffentlichte Änderungen hinweist. -->
   <header class="topbar">
     <div class="topbar-title">
-      <a class="back-link" href="/programm" title="Zur Programm-Timeline">← Programm</a>
-      <h1>Playlists</h1>
+      <a class="brand" href="/">Screenwall</a>
+      <nav class="topnav" id="topnav"></nav>
     </div>
     <div class="topbar-actions">
-      <a class="back-link" href="/programm" title="Zur Programm-Timeline">Timeline &amp; Go Live →</a>
+      <span id="draftbar"></span>
     </div>
   </header>
 
@@ -33,66 +37,41 @@
     <section id="pl-detail" class="pl-detail" hidden>
       <div class="pl-detail-head">
         <a class="back-link" href="/playlists" title="Zur Übersicht">← Übersicht</a>
-        <h2 id="pl-detail-name">Playlist</h2>
-        <span id="pl-root-badge" class="root-badge hidden">★ Startet die Übertragung</span>
-        <span class="pl-detail-actions">
-          <button id="pl-setroot" class="btn">★ Als Start setzen</button>
-          <button id="pl-rename" class="btn ghost">Umbenennen</button>
-          <button id="pl-clone" class="btn ghost">Klonen</button>
-          <button id="pl-delete" class="btn ghost">Löschen</button>
-        </span>
+        <!-- Umbenennen geschieht direkt hier im Titel (früher: Button + prompt). -->
+        <input type="text" id="pl-name" class="pl-name-edit" aria-label="Name der Playlist" />
+        <span id="pl-root-badge" class="badge start hidden">★ Start</span>
+        <span class="pl-detail-actions" id="pl-detail-actions"></span>
       </div>
-      <label class="pl-desc-field">Beschreibung / Kontext (hilft Suche &amp; LLM-Auswahl, z. B. „PV-Anlagen Referenzen")
+      <label class="pl-desc-field">Beschreibung (hilft beim Suchen und der Auswahl per KI, z. B. „PV-Anlagen Referenzen")
         <input type="text" id="pl-desc" placeholder="kurz beschreiben, was drin ist" />
       </label>
 
-      <section class="panel active" id="panel-playlist">
-      <!-- Nachfolge-Aktion der Playlist -->
-      <div class="row after-row">
-        <label>Wenn die Playlist endet
-          <select id="pl-after">
-            <option value="loop">Wiederholen (Loop)</option>
-            <option value="stop">Stoppen (Standbild)</option>
-            <option value="next">Nächste Playlist abspielen</option>
-          </select>
-        </label>
-        <label id="pl-next-wrap" class="hidden">Nächste Playlist
-          <select id="pl-next"></select>
-        </label>
-      </div>
+      <section class="pl-panel">
+        <!-- Nachfolge-Aktion der Playlist -->
+        <div class="row after-row">
+          <label>Wenn die Playlist endet
+            <select id="pl-after">
+              <option value="loop">Wiederholen (Loop)</option>
+              <option value="stop">Stoppen (Standbild)</option>
+              <option value="next">Nächste Playlist abspielen</option>
+            </select>
+          </label>
+          <label id="pl-next-wrap" class="hidden">Nächste Playlist
+            <select id="pl-next"></select>
+          </label>
+        </div>
 
-      <!-- Inhalte hinzufügen -->
-      <div class="add-bar">
-        <button class="btn" data-add="color">+ Farbe</button>
-        <label class="file-btn">+ Bild/Video
-          <input type="file" id="pl-file" accept="image/*,video/*" multiple hidden />
-        </label>
-        <label class="checkbox">
-          <input type="checkbox" id="pl-crop-toggle" /> Bilder vor Upload auf 18:16 zuschneiden
-        </label>
-        <span class="add-inline">
-          <input type="text" id="pl-yt-input" placeholder="YouTube-Link oder Video-ID" />
-          <button class="btn" data-add="youtube">+ YouTube</button>
-        </span>
-        <span class="add-inline">
-          <input type="text" id="pl-web-input" placeholder="https://… oder example.com" />
-          <button class="btn" data-add="webpage">+ Webseite</button>
-        </span>
-        <span class="add-inline">
-          <input type="text" id="pl-ext-input" placeholder="https://… (Netflix, ZDF-Livestream …)" />
-          <button class="btn" data-add="external" title="Öffnet die Seite als nativen Vollbild-Browser auf dem Anzeige-PC (für DRM-Streaming)">+ Externer Inhalt</button>
-        </span>
-        <span class="add-inline">
-          <select id="pl-sub-select"></select>
-          <button class="btn" data-add="playlist">+ Playlist einbetten</button>
-        </span>
-        <button class="btn" data-add="screenshare" title="Entfernten Bildschirm im Netzwerk übertragen">+ Bildschirm teilen</button>
-      </div>
+        <!-- EIN Einstieg zum Hinzufügen: der Dialog fragt danach den Typ ab und
+             zeigt nur die passenden Felder (siehe content.js / CT.buildAddForm). -->
+        <div class="add-row">
+          <button id="pl-add" class="btn">+ Inhalt hinzufügen</button>
+          <span class="hint" style="margin:0">Bild, Video, YouTube, Webseite, Bildschirm,
+            externer Stream, Farbe oder eine andere Playlist.</span>
+        </div>
 
-      <ul id="pl-items" class="media-list"></ul>
-      <p class="hint">Ein einzelner Inhalt wird immer über eine Playlist gespielt.
-        Eine Playlist kann andere Playlists enthalten. Reihenfolge per Drag &amp; Drop
-        ändern; 🗑 entfernt einen Eintrag.</p>
+        <ul id="pl-items" class="media-list"></ul>
+        <p class="hint">Reihenfolge per Ziehen ändern. 🗑 entfernt einen Eintrag.
+          Ein einzelner Inhalt läuft immer über eine Playlist.</p>
       </section>
     </section>
   </main>
@@ -103,51 +82,17 @@
       <span id="conn-text">verbinde…</span>
     </span>
     <span class="vol" title="Lautstärke der Wand (System)">
-      <button id="vol-mute" class="vol-icon" title="Stummschalten">🔊</button>
+      <label class="vol-label" for="vol-range">Wand-Lautstärke</label>
+      <button id="vol-mute" class="vol-icon" title="Stummschalten" aria-label="Stummschalten">🔊</button>
       <input type="range" id="vol-range" min="0" max="100" step="1" value="50" />
       <span id="vol-val" class="vol-val">–</span>
     </span>
-    <nav class="footer-docs">
-      <a href="/docs?d=benutzer" title="Benutzerhandbuch">📖 Handbuch</a>
-      <a href="/docs?d=api" title="API-Dokumentation">🔌 API</a>
-      <a href="/docs?d=entwickler" title="Entwickler & Deployment">🛠 Entwickler</a>
-      <a href="/docs?d=agents" title="Leitfaden für KI-Agenten">🤖 KI-Agenten</a>
-    </nav>
     <a class="screen-link" href="/screen" target="_blank">/screen öffnen ↗</a>
   </footer>
 
-  <!-- Crop-Dialog -->
-  <div id="crop-modal" class="modal hidden">
-    <div class="modal-box">
-      <h3>Auf 18:16 zuschneiden</h3>
-      <div class="crop-stage"><img id="crop-img" alt="" /></div>
-      <div class="modal-actions">
-        <button id="crop-cancel" class="btn ghost">Original verwenden</button>
-        <button id="crop-confirm" class="btn">Zuschneiden &amp; hochladen</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Abspiel-Bestätigung: Playlist sofort live schalten (slide to play) -->
-  <div id="play-modal" class="modal hidden">
-    <div class="preview-box golive-box play-box">
-      <div class="preview-head">
-        <span>Playlist „<strong id="play-pl-name">…</strong>" sofort live abspielen?</span>
-        <button id="play-cancel" class="btn ghost">Abbrechen</button>
-      </div>
-      <p class="hint" style="margin:0">Ersetzt sofort den Inhalt auf der Wand und macht diese Playlist zur aktiven.</p>
-      <div id="play-slider" class="slide-confirm">
-        <div class="slide-fill" id="play-slide-fill"></div>
-        <span class="slide-label">Zum Abspielen schieben →</span>
-        <div class="slide-handle" id="play-slide-handle">▶</div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Sticky-Button: Willkommens-Overlay als eigene Seite -->
-  <a class="overlay-fab" href="/overlay" title="Willkommens-Overlay bearbeiten">Overlay</a>
-
   <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.js"></script>
+  <script src="/js/ui.js"></script>
+  <script src="/js/content.js"></script>
   <script src="/js/playlists.js"></script>
 </body>
 </html>

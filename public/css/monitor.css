@@ -1,54 +1,30 @@
-* { box-sizing: border-box; }
-:root {
+/* Live-Monitor (/). Baut auf base.css auf (Kopfzeile, Navigation, Buttons, Dialog,
+   Slide-to-confirm, Lautstärke) und ergänzt nur das Monitor-Eigene: On-Air-Streifen,
+   Bühne und breite Lautstärkeleiste.
+
+   Der Monitor darf dunkler wirken als die Editoren – das ist ein bewusster
+   Token-Override auf demselben Namensschema, kein zweites Farbsystem. */
+body.monitor {
   --bg: #07080b;
-  --bg-2: #0d0f14;
   --panel: #14171e;
   --border: #232834;
   --text: #eef1f6;
   --muted: #8c93a3;
-  --accent: #4f8cff;
-  --onair: #ff2d2d;
-  --onair-deep: #b30d0d;
 }
+
 html, body {
-  margin: 0;
   height: 100%;
-  background:
-    radial-gradient(1200px 600px at 50% -10%, #11151d 0%, var(--bg) 60%);
-  color: var(--text);
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: radial-gradient(1200px 600px at 50% -10%, #11151d 0%, var(--bg) 60%);
 }
 body { display: flex; flex-direction: column; min-height: 100vh; }
-
-/* ===== Menü (wie auf /settings) ===== */
-.topbar {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 22px;
-  border-bottom: 1px solid var(--border);
-  background: var(--panel);
-  position: sticky; top: 0; z-index: 10;
-}
-.brand {
-  font-size: 20px; font-weight: 700; letter-spacing: 0.02em;
-  color: var(--text); text-decoration: none;
-}
-.brand:hover { color: var(--accent); }
-.settings-link {
-  color: var(--text); text-decoration: none; font-size: 14px; font-weight: 600;
-  padding: 8px 16px; border-radius: 999px;
-  border: 1px solid var(--border); background: var(--panel-2);
-  transition: border-color 0.15s, background 0.15s;
-}
-.settings-link:hover { border-color: var(--accent); }
-.topbar-right { display: flex; align-items: center; gap: 10px; }
 
 /* ===== Schmaler, mittiger On-Air-Streifen (klickbar) ===== */
 .onair-bar {
   display: flex; align-items: center; justify-content: center; gap: 10px;
   width: 100%; padding: 6px 22px; border: 0;
-  background: #e51f25;
+  background: var(--live);
   color: #fff;
-  font-size: 12px; cursor: pointer;
+  font-size: 12px; font-family: inherit; cursor: pointer;
   transition: filter 0.15s;
 }
 .onair-bar:hover { filter: brightness(1.08); }
@@ -56,20 +32,9 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
 /* Off Air: grauer Streifen, kein Puls. */
 .onair-bar.off { background: #3a3f4b; color: #c7ccd6; }
 .onair-bar.off .onair-dot { background: #c7ccd6; animation: none; box-shadow: none; }
-.onair-dot {
-  width: 8px; height: 8px; border-radius: 50%;
-  background: #fff; box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.6);
-  animation: onair-pulse 2s ease-out infinite;
-}
-@keyframes onair-pulse {
-  0%   { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.6); }
-  70%  { box-shadow: 0 0 0 7px rgba(255, 255, 255, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0); }
-}
-@media (prefers-reduced-motion: reduce) { .onair-dot { animation: none; } }
-.onair-label {
-  font-weight: 700; letter-spacing: 0.22em; text-transform: uppercase;
-}
+/* Der Punkt im Streifen ist weiß (auf rotem Grund) – Puls kommt aus base.css. */
+.onair-bar .onair-dot { width: 8px; height: 8px; background: #fff; }
+.onair-label { font-weight: 700; letter-spacing: 0.22em; text-transform: uppercase; }
 
 /* ===== Monitor-Fläche ===== */
 .monitor-main {
@@ -91,48 +56,16 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
 }
 #monitor-frame { width: 100%; height: 100%; border: 0; display: block; }
 
-/* ===== Lautstärke ===== */
+/* ===== Lautstärke (breitere Variante als in den Editor-Fußzeilen) ===== */
 .vol-bar {
   display: flex; align-items: center; gap: 14px;
   background: var(--panel); border: 1px solid var(--border);
-  border-radius: 999px; padding: 10px 20px;
+  border-radius: var(--r-pill); padding: 10px 20px;
 }
-.vol-icon {
-  background: none; border: 0; color: var(--text); font-size: 20px;
-  cursor: pointer; padding: 2px; line-height: 1;
-}
-#vol-range {
-  width: clamp(160px, 32vw, 360px); accent-color: var(--accent); cursor: pointer;
-}
-#vol-range:disabled { opacity: 0.4; cursor: default; }
-.vol-val {
-  min-width: 46px; text-align: right; font-variant-numeric: tabular-nums; font-size: 15px;
-}
+.vol-bar .vol-icon { font-size: 20px; }
+.vol-bar #vol-range { width: clamp(160px, 32vw, 360px); }
+.vol-bar .vol-val { min-width: 46px; font-size: 15px; }
 .vol-caption {
   color: var(--muted); font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase;
   padding-left: 6px; border-left: 1px solid var(--border);
 }
-
-/* ===== Stopp-Modal + Slide-to-stop ===== */
-.modal { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 100; }
-.modal.hidden { display: none; }
-.modal-box { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 22px; width: min(560px, 92vw); }
-.modal-box h3 { margin: 0 0 10px; }
-.modal-hint { color: var(--muted); font-size: 13px; margin: 0 0 16px; line-height: 1.5; }
-.modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
-.btn { background: var(--accent); color: #fff; border: none; border-radius: 8px; padding: 10px 16px; font-size: 15px; cursor: pointer; }
-.btn.ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
-
-.slide-confirm {
-  position: relative; width: 100%; height: 60px; border-radius: 999px;
-  background: var(--bg-2); border: 1px solid var(--border); overflow: hidden;
-  user-select: none; touch-action: none;
-}
-.slide-fill { position: absolute; top: 0; left: 0; height: 100%; width: 56px; background: linear-gradient(90deg, #7a1010, #e51f25); border-radius: 999px; }
-.slide-label { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 15px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; pointer-events: none; }
-.slide-handle {
-  position: absolute; top: 4px; left: 4px; width: 52px; height: 52px; border-radius: 50%;
-  background: #e51f25; color: #fff; display: flex; align-items: center; justify-content: center;
-  font-size: 18px; cursor: grab; touch-action: none; box-shadow: 0 2px 10px rgba(229,31,37,0.5); will-change: transform;
-}
-.slide-handle:active { cursor: grabbing; }

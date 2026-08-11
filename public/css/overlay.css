@@ -1,5 +1,5 @@
-/* Overlay-Canvas-Editor (/overlay). Baut auf control.css auf (Topbar, Buttons,
-   Inputs, Panels) und ergänzt Editor-Layout, Canvas und Snap-Linien. */
+/* Overlay-Canvas-Editor (/overlay). Baut auf base.css auf (Kopfzeile, Buttons,
+   Formularfelder, Dialoge) und ergänzt Editor-Layout, Canvas und Snap-Linien. */
 
 .ed-layout { display: flex; align-items: flex-start; gap: 16px; padding: 16px 20px; max-width: 1500px; margin: 0 auto; }
 .ed-side {
@@ -31,7 +31,6 @@
 .ed-field.inline { flex-direction: row; align-items: center; gap: 6px; }
 .ed-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .ed-color { width: 38px; height: 30px; padding: 2px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; }
-.btn.tiny { padding: 5px 10px; font-size: 12px; }
 
 /* Canvas / Bühne (18:16, exakt skaliert wie die Live-Vorschau) */
 .ov-stage { position: relative; background: #000; border-radius: 8px; overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,0.5); }
