@@ -258,6 +258,16 @@ input.invalid, select.invalid { border-color: var(--danger); }
 .sect-note { margin-left: auto; color: var(--muted); font-size: 12px; font-weight: 400; }
 .sect-body { padding: 2px 11px 12px; display: flex; flex-direction: column; gap: 10px; }
 
+/* ===== Typ-Symbole ====================================================== */
+/* Echte Logos statt eines generischen Zeichens (siehe CT.badgeEl). In em, damit
+   sie überall der Schriftgröße des Einsatzorts folgen. Das YouTube-Logo ist
+   breiter als hoch (28.57:20), deshalb wird die Höhe geführt. */
+.ct-logo { display: inline-flex; align-items: center; justify-content: center; line-height: 1; }
+.ct-logo svg { height: 0.72em; width: auto; display: block; }
+/* Auf dunklem Grund braucht das Rot etwas Abhebung, wie die Emoji-Zeichen sie
+   durch ihre Kontur haben. */
+.pl-sb-badge .ct-logo svg { height: 0.8em; }
+
 /* ===== Typ-Kacheln ("Inhalt hinzufügen") ================================ */
 .type-grid {
   display: grid; gap: 10px;

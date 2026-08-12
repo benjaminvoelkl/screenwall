@@ -20,6 +20,10 @@
   let liveNowPlaying = null;    // Was läuft gerade live auf der Wand?
   let lastPlSig = null;         // Signatur des zuletzt gezeichneten Zustands
 
+  // Typ-Symbol in einem Träger-Element: Zeichen oder (bei YouTube) das Logo.
+  const badgeInto = (cls, type) => { const s = U.el('span', cls); s.appendChild(CT.badgeEl(type)); return s; };
+  const typeBadge = (type) => badgeInto('tt-badge', type);
+
   const playlists = () => state.playlists;
   const selPl = () => playlists().byId[selectedId] || playlists().byId[playlists().rootId];
   const isRoot = (pl) => pl.id === playlists().rootId;
@@ -206,7 +210,7 @@
       tile.type = 'button';
       tile.setAttribute('aria-pressed', 'false');
       tile.append(
-        Object.assign(U.el('span', 'tt-badge', t.badge), { ariaHidden: 'true' }),
+        Object.assign(typeBadge(t.type), { ariaHidden: 'true' }),
         U.el('span', 'tt-label', t.label),
         U.el('span', 'tt-hint', t.hint)
       );
@@ -235,7 +239,7 @@
     const chosen = U.el('div', 'type-chosen');
     const txt = U.el('div');
     txt.append(U.el('div', 'tt-label', type.label), U.el('div', 'tt-hint', type.hint));
-    chosen.append(Object.assign(U.el('span', 'tt-badge', type.badge), { ariaHidden: 'true' }), txt);
+    chosen.append(Object.assign(typeBadge(type.type), { ariaHidden: 'true' }), txt);
     body.append(chosen, form.node);
 
     let busy = false;
@@ -519,7 +523,7 @@
       } else if (c.type === 'video' && c.filename) {
         block.appendChild(CT.buildFilmstrip(c.filename, dur, pps, SB_OPT));
       }
-      const badge = U.el('span', 'pl-sb-badge', CT.badge(c.type));
+      const badge = badgeInto('pl-sb-badge', c.type);
       badge.title = CT.label(c.type);
       block.appendChild(badge);
       // Name + Dauer – nur zeigen, wenn der Block breit genug ist.
@@ -613,7 +617,7 @@
       img.src = `https://i.ytimg.com/vi/${c.videoId}/default.jpg`; img.alt = '';
       return img;
     }
-    const badge = U.el('span', 'thumb type-badge', CT.badge(c.type));
+    const badge = badgeInto('thumb type-badge', c.type);
     badge.title = CT.label(c.type);
     return badge;
   }

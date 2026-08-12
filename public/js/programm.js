@@ -186,7 +186,8 @@
       if ((c.type === 'video' || c.type === 'youtube') && c.videoMode !== 'duration') el.classList.add('end-video');
 
       const badge = document.createElement('span');
-      badge.className = 'tl-b-type'; badge.textContent = window.CT.badge(c.type);
+      badge.className = 'tl-b-type';
+      badge.appendChild(window.CT.badgeEl(c.type));
       badge.title = window.CT.label(c.type);
       el.appendChild(badge);
 
