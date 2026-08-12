@@ -42,10 +42,6 @@
         <span id="pl-root-badge" class="badge start hidden">★ Start</span>
         <span class="pl-detail-actions" id="pl-detail-actions"></span>
       </div>
-      <!-- Selten gebraucht: beim Anlegen fragt nichts mehr danach, und im Alltag
-           genügen Name und Inhalte. Deshalb eingeklappt (siehe UI.section). -->
-      <div id="pl-more"></div>
-
       <section class="pl-panel">
         <!-- EIN Einstieg zum Hinzufügen: der Dialog fragt danach den Typ ab und
              zeigt nur die passenden Felder (siehe content.js / CT.buildAddForm). -->
@@ -59,6 +55,10 @@
         <p class="hint">Reihenfolge per Ziehen ändern. 🗑 entfernt einen Eintrag.
           Ein einzelner Inhalt läuft immer über eine Playlist.</p>
       </section>
+
+      <!-- Steht bewusst UNTER den Inhalten: selten gebraucht, und beim Anlegen
+           fragt nichts mehr danach. Eingeklappt (siehe UI.section). -->
+      <div id="pl-more"></div>
     </section>
   </main>
 
