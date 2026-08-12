@@ -42,25 +42,11 @@
         <span id="pl-root-badge" class="badge start hidden">★ Start</span>
         <span class="pl-detail-actions" id="pl-detail-actions"></span>
       </div>
-      <label class="pl-desc-field">Beschreibung (hilft beim Suchen und der Auswahl per KI, z. B. „PV-Anlagen Referenzen")
-        <input type="text" id="pl-desc" placeholder="kurz beschreiben, was drin ist" />
-      </label>
+      <!-- Selten gebraucht: beim Anlegen fragt nichts mehr danach, und im Alltag
+           genügen Name und Inhalte. Deshalb eingeklappt (siehe UI.section). -->
+      <div id="pl-more"></div>
 
       <section class="pl-panel">
-        <!-- Nachfolge-Aktion der Playlist -->
-        <div class="row after-row">
-          <label>Wenn die Playlist endet
-            <select id="pl-after">
-              <option value="loop">Wiederholen (Loop)</option>
-              <option value="stop">Stoppen (Standbild)</option>
-              <option value="next">Nächste Playlist abspielen</option>
-            </select>
-          </label>
-          <label id="pl-next-wrap" class="hidden">Nächste Playlist
-            <select id="pl-next"></select>
-          </label>
-        </div>
-
         <!-- EIN Einstieg zum Hinzufügen: der Dialog fragt danach den Typ ab und
              zeigt nur die passenden Felder (siehe content.js / CT.buildAddForm). -->
         <div class="add-row">

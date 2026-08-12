@@ -49,8 +49,9 @@ Login, alle im selben Netzwerk können steuern.
 
 ## Erste Schritte
 
-1. **Playlist anlegen** (`/playlists`): „+ Neue Playlist" fragt Name, Beschreibung
-   und das Verhalten am Ende in einem Dialog ab und öffnet dann die Playlist.
+1. **Playlist anlegen** (`/playlists`): „+ Neue Playlist" legt sofort an und öffnet
+   sie – der Name steht markiert bereit, tippen genügt. KI-Kontext und das
+   Verhalten am Ende stehen unter **„Weitere Optionen"**.
 2. **Playlist füllen:** „+ Inhalt hinzufügen" öffnet die Typ-Auswahl; danach
    erscheinen nur die Felder, die der gewählte Typ braucht. Reihenfolge per
    Drag & Drop, Dauer und Optionen je Eintrag direkt in der Liste.

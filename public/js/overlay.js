@@ -25,7 +25,10 @@
   // ---- API ----------------------------------------------------------------
   // Speichern quittiert sichtbar und meldet Serverfehler (vorher stillschweigend
   // verschluckt: `return r.json().catch(() => ({}))`).
-  const api = (method, url, body) => U.save(method, url, body).catch(() => ({}));
+  // U.save meldet Serverfehler bereits per Toast; null (statt {}) sorgt dafür,
+  // dass die `if (created && created.id)`-Prüfungen einen Fehlschlag auch als
+  // solchen erkennen, statt Erfolg vorzutäuschen.
+  const api = (method, url, body) => U.save(method, url, body).catch(() => null);
   const overlays = () => (state && state.overlays) || [];
   const library = () => (state && state.library) || [];
   const selOverlay = () => overlays().find((o) => o.id === selOvId) || null;
@@ -52,9 +55,26 @@
     .catch(() => {});
 
   // ---- Render-Steuerung ---------------------------------------------------
+  // Zwei getrennte Signaturen, weil Listen/Canvas und Inspektor auf
+  // Unterschiedliches reagieren müssen.
   function structSig() {
     return JSON.stringify(overlays().map((o) => [o.id, o.elements.map((e) => e.id + ':' + e.type)]))
       + '|' + selOvId + '|' + selIds.join(',') + '|' + library().map((l) => l.id).join(',');
+  }
+  // Genau die Werte, die entscheiden, WELCHE Felder es gibt. Fehlten sie hier,
+  // erschienen Rand-Breite, die WLAN-Felder, der Eckenradius und die
+  // Datenquellen-Felder erst nach erneutem Anklicken des Elements.
+  function inspSig() {
+    const e = selElement();
+    if (!e) {
+      // Ohne Elementauswahl zeigt der Inspektor das Overlay – inkl. "Ebene x von y",
+      // das sich beim Umsortieren ändert, also mit in die Signatur muss.
+      const o = selOverlay();
+      return ['ov', o ? o.id : '-', overlays().findIndex((x) => o && x.id === o.id),
+        overlays().length, selIds.length].join(':');
+    }
+    return [e.id, e.type, e.shape, e.qrMode, !!(e.border && e.border.enabled),
+      (e.source || {}).kind, selIds.length].join('|');
   }
   function render() {
     if (!state) return;
@@ -64,11 +84,29 @@
     renderOverlayList();
     const sig = structSig();
     const structural = sig !== lastSig; lastSig = sig;
-    $('ov-props-box').hidden = !selOverlay();
     $('el-box').hidden = !selOverlay();
-    if (structural) { renderOverlayProps(); renderElementList(); renderElementProps(); renderLibrary(); rebuildCanvas(); }
+    if (structural) { renderElementList(); renderLibrary(); rebuildCanvas(); }
     else if (!dragging) updateCanvas();
+    renderInspector();
   }
+
+  // Werte-Abgleich ohne Neuaufbau: beim Bauen meldet sich jedes Feld hier an,
+  // danach lassen sich die Werte nachziehen, ohne Cursor, offene Auswahllisten
+  // oder den Farbwähler zu zerstören.
+  let inspBind = [];
+  function bind(input, get) { inspBind.push({ input, get }); return input; }
+  function syncInspector() {
+    const e = selElement(); if (!e) return;
+    for (const b of inspBind) setIfNotFocused(b.input, b.get(e));
+  }
+  function renderInspector() {
+    const sig = inspSig();
+    if (sig === lastInspSig) { syncInspector(); return; }
+    lastInspSig = sig;
+    inspBind = [];
+    buildInspector();
+  }
+  let lastInspSig = null;
 
   // ---- Overlay-Liste ------------------------------------------------------
   function renderOverlayList() {
@@ -93,30 +131,49 @@
     if (o && o.id) { selOvId = o.id; selIds = []; }
   });
 
-  // ---- Overlay-Eigenschaften ---------------------------------------------
-  function renderOverlayProps() {
-    const o = selOverlay(); const box = $('ov-props');
-    box.innerHTML = '';
-    if (!o) return;
-    box.appendChild(field('Name', textInput(o.name, (v) => api('PATCH', `/api/overlay/${o.id}`, { name: v }))));
-    box.appendChild(field('Hintergrund-Blur (px)', numInput(o.blur, 0, 60, 1, (v) => api('PATCH', `/api/overlay/${o.id}`, { blur: v }))));
-    const hint = el('div', 'ed-empty-hint'); hint.textContent = 'Anzeige-Zeitfenster werden in der Programm-Timeline pro Playlist gesetzt.';
-    box.appendChild(hint);
-    const actions = el('div', 'ed-row'); actions.style.marginTop = '10px';
-    actions.appendChild(btn('In den Vordergrund', 'tiny', () => moveZ(o.id, +1)));
-    actions.appendChild(btn('Nach hinten', 'tiny ghost', () => moveZ(o.id, -1)));
-    actions.appendChild(btn('Löschen', 'tiny danger', async () => {
-      const ok = await U.confirmDialog({
-        title: 'Overlay löschen?',
-        text: `„${o.name}" wird mit allen ${o.elements.length} Elementen gelöscht. `
-          + 'Auch seine Anzeigefenster in den Playlists verschwinden damit.',
-        confirmLabel: 'Löschen', danger: true
-      });
-      if (!ok) return;
-      await api('DELETE', `/api/overlay/${o.id}`);
-      selOvId = null; selIds = [];
-    }));
-    box.appendChild(actions);
+  // ---- Overlay-Eigenschaften (Inspektor ohne Elementauswahl) --------------
+  function buildOverlayProps(head, body) {
+    const o = selOverlay();
+    if (!o) {
+      head.appendChild(el('div', 'ed-insp-title', 'Kein Overlay'));
+      body.appendChild(el('div', 'ed-empty-hint', 'Links ein Overlay auswählen oder anlegen.'));
+      return;
+    }
+    const title = el('div', 'ed-insp-title');
+    title.appendChild(el('span', null, 'Overlay'));
+    // Ohne diese Angabe war den Ebenen-Knöpfen nicht anzusehen, dass sie wirken:
+    // die Bühne zeigt immer nur das gewählte Overlay.
+    const idx = overlays().findIndex((x) => x.id === o.id);
+    title.appendChild(el('span', 'ed-tag', `Ebene ${idx + 1} von ${overlays().length}`));
+    head.appendChild(title);
+
+    const acts = el('div', 'ed-insp-acts');
+    acts.appendChild(btn('▲ vor', 'tiny', () => moveZ(o.id, +1)));
+    acts.appendChild(btn('▼ zurück', 'tiny ghost', () => moveZ(o.id, -1)));
+    acts.appendChild(U.overflowMenu([
+      {
+        label: '🗑 Overlay löschen', danger: true,
+        onClick: async () => {
+          const ok = await U.confirmDialog({
+            title: 'Overlay löschen?',
+            text: `„${o.name}" wird mit allen ${o.elements.length} Elementen gelöscht. `
+              + 'Auch seine Anzeigefenster in den Playlists verschwinden damit.',
+            confirmLabel: 'Löschen', danger: true
+          });
+          if (!ok) return;
+          await api('DELETE', `/api/overlay/${o.id}`);
+          selOvId = null; selIds = [];
+        }
+      }
+    ], { label: `Weitere Aktionen für „${o.name}"` }));
+    head.appendChild(acts);
+
+    const b = el('div', 'ed-fields');
+    b.appendChild(field('Name', textInput(o.name, (v) => api('PATCH', `/api/overlay/${o.id}`, { name: v }))));
+    b.appendChild(field('Hintergrund-Blur (px)', numInput(o.blur, 0, 60, 1, (v) => api('PATCH', `/api/overlay/${o.id}`, { blur: v }))));
+    body.appendChild(b);
+    body.appendChild(el('div', 'ed-empty-hint',
+      'Anzeige-Zeitfenster werden in der Programm-Timeline pro Playlist gesetzt.'));
   }
   async function moveZ(id, dir) {
     const ids = overlays().map((o) => o.id);
@@ -183,139 +240,195 @@
   // Gemeinsame Flächen-Stil-Felder (für Shapes und als Hintergrund von Text).
   function appendSurfaceFields(box, e, { fillLabel }) {
     const border = e.border || { enabled: false, width: 6, color: '#000000' };
+    const fillOf = (x) => ((x.type === 'shape' ? x.fill : x.bg) || '#3b82f6');
     const g1 = el('div', 'ed-grid2');
-    if (fillLabel) g1.appendChild(field(fillLabel, colorInput((e.type === 'shape' ? e.fill : e.bg) || '#3b82f6', (v) => patchEl(e.type === 'shape' ? { fill: v } : { bg: v }))));
-    g1.appendChild(field('Deckkraft', rangeInput(e.fillOpacity ?? 1, 0, 1, 0.05, (v) => patchEl({ fillOpacity: v }))));
+    if (fillLabel) g1.appendChild(field(fillLabel, bind(colorInput(fillOf(e), (v) => patchEl(e.type === 'shape' ? { fill: v } : { bg: v })), fillOf)));
+    g1.appendChild(field('Deckkraft', bind(rangeInput(e.fillOpacity ?? 1, 0, 1, 0.05, (v) => patchEl({ fillOpacity: v })), (x) => x.fillOpacity ?? 1)));
     box.appendChild(g1);
     box.appendChild(field('Rand anzeigen', checkboxInput(!!border.enabled, (v) => patchEl({ border: { ...border, enabled: v } }))));
     if (border.enabled) {
       const g2 = el('div', 'ed-grid2');
-      g2.appendChild(field('Rand-Breite', numInput(border.width ?? 6, 0, 200, 1, (v) => patchEl({ border: { ...border, width: v } }))));
-      g2.appendChild(field('Rand-Farbe', colorInput(border.color || '#000000', (v) => patchEl({ border: { ...border, color: v } }))));
+      g2.appendChild(field('Rand-Breite', bind(numInput(border.width ?? 6, 0, 200, 1, (v) => patchEl({ border: { ...border, width: v } })), (x) => (x.border || {}).width ?? 6)));
+      g2.appendChild(field('Rand-Farbe', bind(colorInput(border.color || '#000000', (v) => patchEl({ border: { ...border, color: v } })), (x) => (x.border || {}).color || '#000000')));
       box.appendChild(g2);
     }
     const g3 = el('div', 'ed-grid2');
-    g3.appendChild(field('Blur', numInput(e.blur || 0, 0, 200, 1, (v) => patchEl({ blur: v }))));
-    g3.appendChild(field('Blur-Art', selectInput([['backdrop', 'Hintergrund'], ['self', 'Selbst']], e.blurMode || 'backdrop', (v) => patchEl({ blurMode: v }))));
+    g3.appendChild(field('Blur', bind(numInput(e.blur || 0, 0, 200, 1, (v) => patchEl({ blur: v })), (x) => x.blur || 0)));
+    g3.appendChild(field('Blur-Art', bind(selectInput([['backdrop', 'Hintergrund'], ['self', 'Selbst']], e.blurMode || 'backdrop', (v) => patchEl({ blurMode: v })), (x) => x.blurMode || 'backdrop')));
     box.appendChild(g3);
     if (!(e.type === 'shape' && e.shape === 'circle')) {
-      box.appendChild(field('Eckenradius', numInput(e.radius || 0, 0, 400, 1, (v) => patchEl({ radius: v }))));
+      box.appendChild(field('Eckenradius', bind(numInput(e.radius || 0, 0, 400, 1, (v) => patchEl({ radius: v })), (x) => x.radius || 0)));
     }
   }
 
-  function renderElementProps() {
-    const box = $('el-props'); box.innerHTML = '';
+  // ---- Inspektor ==========================================================
+  // Kopf = worum es geht + die zwei, drei Aktionen dazu. Körper = die Felder,
+  // gruppiert in einklappbare Abschnitte statt einer Liste aus ~18 Feldern.
+  function buildInspector() {
+    const head = $('insp-head'), body = $('insp-body');
+    head.replaceChildren(); body.replaceChildren();
+
     const sel = selElements();
-    if (sel.length > 1) {
-      box.appendChild(hr());
-      const info = el('div', 'ed-empty-hint'); info.textContent = `${sel.length} Elemente ausgewählt`;
-      box.appendChild(info);
-      box.appendChild(btn('Auswahl löschen', 'tiny danger', async () => {
-        const ok = await U.confirmDialog({
-          title: `${sel.length} Elemente löschen?`,
-          text: 'Die ausgewählten Elemente werden aus diesem Overlay entfernt.',
-          confirmLabel: 'Löschen', danger: true
-        });
-        if (!ok) return;
-        const o = selOverlay(); if (!o) return;
-        for (const e of sel) await api('DELETE', `/api/overlay/${o.id}/element/${e.id}`);
-        selIds = [];
-      }));
-      return;
-    }
-    const e = selElement(); if (!e) return;
-    box.appendChild(hr());
+    if (sel.length > 1) { buildMultiProps(head, body, sel); return; }
+    const e = selElement();
+    if (!e) { buildOverlayProps(head, body); return; }
+    buildElementProps(head, body, e);
+  }
+
+  function buildMultiProps(head, body, sel) {
+    head.appendChild(el('div', 'ed-insp-title', `${sel.length} Elemente ausgewählt`));
+    const acts = el('div', 'ed-insp-acts');
+    acts.appendChild(btn('⧉ Duplizieren', 'tiny', () => duplicateSelection()));
+    acts.appendChild(btn('🗑 Löschen', 'tiny danger', () => deleteSelection()));
+    acts.appendChild(btn('＋ Bibliothek', 'tiny ghost', () => saveSelectionToLibrary()));
+    head.appendChild(acts);
+    body.appendChild(el('div', 'ed-empty-hint',
+      'Gemeinsam verschieben, duplizieren, löschen oder als Gruppe sichern. '
+      + 'Einzelne Eigenschaften: nur ein Element auswählen.'));
+  }
+
+  function buildElementProps(head, body, e) {
+    // ---- Kopf
+    const title = el('div', 'ed-insp-title');
+    title.appendChild(el('span', null, elementTitle(e)));
+    title.appendChild(el('span', 'ed-tag', EL_LABEL[e.type] || e.type));
+    head.appendChild(title);
+    const acts = el('div', 'ed-insp-acts');
+    acts.appendChild(btn('⧉ Duplizieren', 'tiny', () => duplicateSelection()));
+    acts.appendChild(btn('🗑 Löschen', 'tiny danger', () => deleteSelection()));
+    acts.appendChild(U.overflowMenu([
+      { label: '＋ In Bibliothek speichern', onClick: () => saveSelectionToLibrary() }
+    ], { label: 'Weitere Aktionen für dieses Element' }));
+    head.appendChild(acts);
+
+    // ---- Abschnitt "Inhalt" (typabhängig)
+    const inhalt = el('div', 'ed-fields');
     if (e.type === 'text') {
-      box.appendChild(field('Text', textArea(e.text, (v) => patchEl({ text: v }))));
+      inhalt.appendChild(field('Text', bind(textArea(e.text, (v) => patchEl({ text: v })), (x) => x.text)));
       const g = el('div', 'ed-grid2');
-      g.appendChild(field('Farbe', colorInput(e.color || '#ffffff', (v) => patchEl({ color: v }))));
-      g.appendChild(field('Ausrichtung', selectInput([['left', 'Links'], ['center', 'Mitte'], ['right', 'Rechts']], e.align, (v) => patchEl({ align: v }))));
-      box.appendChild(g);
-      box.appendChild(field('Schriftgröße (Anteil)', rangeInput(e.fontFrac ?? 0.5, 0.1, 1, 0.02, (v) => patchEl({ fontFrac: v }))));
-      box.appendChild(field('Schriftstärke', selectInput([['400', 'Normal'], ['700', 'Fett'], ['900', 'Extra']], String(e.weight || 700), (v) => patchEl({ weight: Number(v) }))));
-      box.appendChild(hr());
-      const cap = el('div', 'ed-cap'); cap.textContent = 'Fläche (Hintergrund)';
-      box.appendChild(cap);
-      appendSurfaceFields(box, e, { fillLabel: 'Hintergrund' });
-      box.appendChild(field('Innenabstand', rangeInput(e.pad ?? 0, 0, 0.5, 0.02, (v) => patchEl({ pad: v }))));
+      g.appendChild(field('Farbe', bind(colorInput(e.color || '#ffffff', (v) => patchEl({ color: v })), (x) => x.color || '#ffffff')));
+      g.appendChild(field('Ausrichtung', bind(selectInput([['left', 'Links'], ['center', 'Mitte'], ['right', 'Rechts']], e.align, (v) => patchEl({ align: v })), (x) => x.align)));
+      inhalt.appendChild(g);
+      inhalt.appendChild(field('Schriftgröße (Anteil)', bind(rangeInput(e.fontFrac ?? 0.5, 0.1, 1, 0.02, (v) => patchEl({ fontFrac: v })), (x) => x.fontFrac ?? 0.5)));
+      inhalt.appendChild(field('Schriftstärke', bind(selectInput([['400', 'Normal'], ['700', 'Fett'], ['900', 'Extra']], String(e.weight || 700), (v) => patchEl({ weight: Number(v) })), (x) => String(x.weight || 700))));
     } else if (e.type === 'shape') {
-      box.appendChild(field('Form', selectInput([['rect', 'Rechteck'], ['circle', 'Kreis']], e.shape || 'rect', (v) => patchEl({ shape: v }))));
-      appendSurfaceFields(box, e, { fillLabel: 'Füllfarbe' });
+      inhalt.appendChild(field('Form', bind(selectInput([['rect', 'Rechteck'], ['circle', 'Kreis']], e.shape || 'rect', (v) => patchEl({ shape: v })), (x) => x.shape || 'rect')));
     } else if (e.type === 'image') {
-      box.appendChild(btn(e.filename ? 'Bild ersetzen' : 'Bild hochladen', 'tiny', () => triggerImageUpload()));
-      box.appendChild(field('oder Bild-URL', textInput(e.url || '', (v) => patchEl({ url: v }))));
-      box.appendChild(field('Skalierung', selectInput([['contain', 'Einpassen'], ['cover', 'Füllen']], e.fit, (v) => patchEl({ fit: v }))));
+      inhalt.appendChild(btn(e.filename ? 'Bild ersetzen' : 'Bild hochladen', 'tiny', () => triggerImageUpload()));
+      inhalt.appendChild(field('oder Bild-URL', bind(textInput(e.url || '', (v) => patchEl({ url: v })), (x) => x.url || '')));
+      inhalt.appendChild(field('Skalierung', bind(selectInput([['contain', 'Einpassen'], ['cover', 'Füllen']], e.fit, (v) => patchEl({ fit: v })), (x) => x.fit)));
     } else if (e.type === 'qr') {
       const mode = e.qrMode || 'url';
-      box.appendChild(field('QR-Typ', selectInput([['url', 'URL/Link'], ['wifi', 'WLAN'], ['contact', 'Kontakt']], mode, (v) => patchEl({ qrMode: v }))));
+      inhalt.appendChild(field('QR-Typ', bind(selectInput([['url', 'URL/Link'], ['wifi', 'WLAN'], ['contact', 'Kontakt']], mode, (v) => patchEl({ qrMode: v })), (x) => x.qrMode || 'url')));
       if (mode === 'wifi') {
-        box.appendChild(field('Netzwerk (SSID)', textInput(e.ssid || '', (v) => patchEl({ ssid: v }))));
-        box.appendChild(field('Passwort', textInput(e.password || '', (v) => patchEl({ password: v }))));
+        inhalt.appendChild(field('Netzwerk (SSID)', bind(textInput(e.ssid || '', (v) => patchEl({ ssid: v })), (x) => x.ssid || '')));
+        inhalt.appendChild(field('Passwort', bind(textInput(e.password || '', (v) => patchEl({ password: v })), (x) => x.password || '')));
         const g = el('div', 'ed-grid2');
-        g.appendChild(field('Verschlüsselung', selectInput([['WPA', 'WPA/WPA2'], ['WEP', 'WEP'], ['nopass', 'offen']], e.encryption || 'WPA', (v) => patchEl({ encryption: v }))));
+        g.appendChild(field('Verschlüsselung', bind(selectInput([['WPA', 'WPA/WPA2'], ['WEP', 'WEP'], ['nopass', 'offen']], e.encryption || 'WPA', (v) => patchEl({ encryption: v })), (x) => x.encryption || 'WPA')));
         g.appendChild(field('Verstecktes Netz', checkboxInput(!!e.hidden, (v) => patchEl({ hidden: v }))));
-        box.appendChild(g);
+        inhalt.appendChild(g);
       } else if (mode === 'contact') {
-        box.appendChild(field('Name', textInput(e.cname || '', (v) => patchEl({ cname: v }))));
+        inhalt.appendChild(field('Name', bind(textInput(e.cname || '', (v) => patchEl({ cname: v })), (x) => x.cname || '')));
         const g = el('div', 'ed-grid2');
-        g.appendChild(field('Telefon', textInput(e.phone || '', (v) => patchEl({ phone: v }))));
-        g.appendChild(field('E-Mail', textInput(e.email || '', (v) => patchEl({ email: v }))));
-        box.appendChild(g);
+        g.appendChild(field('Telefon', bind(textInput(e.phone || '', (v) => patchEl({ phone: v })), (x) => x.phone || '')));
+        g.appendChild(field('E-Mail', bind(textInput(e.email || '', (v) => patchEl({ email: v })), (x) => x.email || '')));
+        inhalt.appendChild(g);
         const g2 = el('div', 'ed-grid2');
-        g2.appendChild(field('Firma', textInput(e.org || '', (v) => patchEl({ org: v }))));
-        g2.appendChild(field('Webseite', textInput(e.url || '', (v) => patchEl({ url: v }))));
-        box.appendChild(g2);
+        g2.appendChild(field('Firma', bind(textInput(e.org || '', (v) => patchEl({ org: v })), (x) => x.org || '')));
+        g2.appendChild(field('Webseite', bind(textInput(e.url || '', (v) => patchEl({ url: v })), (x) => x.url || '')));
+        inhalt.appendChild(g2);
       } else {
-        box.appendChild(field('URL / Link', textInput(e.url || e.data || '', (v) => patchEl({ url: v }))));
+        inhalt.appendChild(field('URL / Link', bind(textInput(e.url || e.data || '', (v) => patchEl({ url: v })), (x) => x.url || x.data || '')));
       }
       const gc = el('div', 'ed-grid2');
-      gc.appendChild(field('Vordergrund', colorInput(e.fg || '#000000', (v) => patchEl({ fg: v }))));
-      gc.appendChild(field('Hintergrund', colorInput(e.bg || '#ffffff', (v) => patchEl({ bg: v }))));
-      box.appendChild(gc);
+      gc.appendChild(field('Vordergrund', bind(colorInput(e.fg || '#000000', (v) => patchEl({ fg: v })), (x) => x.fg || '#000000')));
+      gc.appendChild(field('Hintergrund', bind(colorInput(e.bg || '#ffffff', (v) => patchEl({ bg: v })), (x) => x.bg || '#ffffff')));
+      inhalt.appendChild(gc);
     }
-    // Position/Größe (in %)
+    body.appendChild(U.section({ key: 'ov.insp.inhalt', title: 'Inhalt', open: true, body: inhalt }));
+
+    // ---- Abschnitt "Fläche" (nur wo es eine gibt)
+    if (e.type === 'text' || e.type === 'shape') {
+      const flaeche = el('div', 'ed-fields');
+      appendSurfaceFields(flaeche, e, { fillLabel: e.type === 'shape' ? 'Füllfarbe' : 'Hintergrund' });
+      if (e.type === 'text') {
+        flaeche.appendChild(field('Innenabstand', bind(rangeInput(e.pad ?? 0, 0, 0.5, 0.02, (v) => patchEl({ pad: v })), (x) => x.pad ?? 0)));
+      }
+      body.appendChild(U.section({
+        key: 'ov.insp.flaeche', title: 'Fläche',
+        note: e.type === 'text' ? 'Hintergrund des Textes' : '',
+        open: e.type === 'shape', body: flaeche
+      }));
+    }
+
+    // ---- Abschnitt "Position, Größe & Ebene"
+    // Zehntelprozent statt ganzer Prozent: beim Ziehen entstehen feinere Werte,
+    // die das Feld sonst beim ersten Anfassen zerstörte.
+    const pos = el('div', 'ed-fields');
     const pg = el('div', 'ed-grid2');
-    pg.appendChild(field('X %', numInput(Math.round(e.x * 100), 0, 100, 1, (v) => patchEl({ x: v / 100 }))));
-    pg.appendChild(field('Y %', numInput(Math.round(e.y * 100), 0, 100, 1, (v) => patchEl({ y: v / 100 }))));
-    pg.appendChild(field('Breite %', numInput(Math.round(e.w * 100), 1, 100, 1, (v) => patchEl({ w: v / 100 }))));
-    pg.appendChild(field('Höhe %', numInput(Math.round(e.h * 100), 1, 100, 1, (v) => patchEl({ h: v / 100 }))));
-    box.appendChild(pg);
-
-    // Externe Datenquelle (Phase-1-Vorbereitung: Wetter/News)
-    box.appendChild(hr());
-    const src = e.source || { kind: 'static' };
-    box.appendChild(field('Datenquelle', selectInput([['static', 'Statisch'], ['url', 'Externe URL']], src.kind, (v) => patchEl({ source: { ...src, kind: v } }))));
-    if (src.kind === 'url') {
-      box.appendChild(field('URL', textInput(src.url || '', (v) => patchEl({ source: { ...src, kind: 'url', url: v } }))));
-      const g = el('div', 'ed-grid2');
-      g.appendChild(field('Refresh (s)', numInput(src.refreshSec || 60, 2, 86400, 1, (v) => patchEl({ source: { ...src, kind: 'url', refreshSec: v } }))));
-      g.appendChild(field('JSON-Pfad', textInput(src.jsonPath || '', (v) => patchEl({ source: { ...src, kind: 'url', jsonPath: v } }))));
-      box.appendChild(g);
-    }
-
-    // Z-Ordnung innerhalb des Overlays (Vorder-/Hintergrund)
-    box.appendChild(hr());
-    const zcap = el('div', 'ed-cap'); zcap.textContent = 'Reihenfolge';
-    box.appendChild(zcap);
+    const pct = (v) => Math.round(v * 1000) / 10;
+    pg.appendChild(field('X %', bind(numInput(pct(e.x), 0, 100, 0.1, (v) => patchEl({ x: v / 100 })), (x) => pct(x.x))));
+    pg.appendChild(field('Y %', bind(numInput(pct(e.y), 0, 100, 0.1, (v) => patchEl({ y: v / 100 })), (x) => pct(x.y))));
+    pg.appendChild(field('Breite %', bind(numInput(pct(e.w), 0.1, 100, 0.1, (v) => patchEl({ w: v / 100 })), (x) => pct(x.w))));
+    pg.appendChild(field('Höhe %', bind(numInput(pct(e.h), 0.1, 100, 0.1, (v) => patchEl({ h: v / 100 })), (x) => pct(x.h))));
+    pos.appendChild(pg);
     const z = el('div', 'ed-row');
-    z.appendChild(btn('▲ Vordergrund', 'tiny', () => moveElZ(+1)));
-    z.appendChild(btn('▼ Hintergrund', 'tiny ghost', () => moveElZ(-1)));
+    z.appendChild(btn('▲ vor', 'tiny', () => moveElZ(+1)));
+    z.appendChild(btn('▼ zurück', 'tiny ghost', () => moveElZ(-1)));
     z.appendChild(btn('⤒ ganz vorn', 'tiny', () => moveElZ(+1, true)));
     z.appendChild(btn('⤓ ganz hinten', 'tiny ghost', () => moveElZ(-1, true)));
-    box.appendChild(z);
+    pos.appendChild(z);
+    body.appendChild(U.section({ key: 'ov.insp.pos', title: 'Position, Größe & Ebene', open: true, body: pos }));
 
-    box.appendChild(hr());
-    box.appendChild(btn('Element löschen', 'tiny danger', async () => {
-      const o = selOverlay(); if (!o) return;
-      const ok = await U.confirmDialog({
-        title: 'Element löschen?',
-        text: `„${elementTitle(e)}" wird aus „${o.name}" entfernt.`,
-        confirmLabel: 'Löschen', danger: true
-      });
-      if (!ok) return;
-      await api('DELETE', `/api/overlay/${o.id}/element/${e.id}`);
-      selIds = [];
+    // ---- Abschnitt "Datenquelle" (Vorbereitung Wetter/News)
+    const src = e.source || { kind: 'static' };
+    const quelle = el('div', 'ed-fields');
+    quelle.appendChild(field('Datenquelle', bind(selectInput([['static', 'Statisch'], ['url', 'Externe URL']], src.kind, (v) => patchEl({ source: { ...src, kind: v } })), (x) => (x.source || {}).kind || 'static')));
+    if (src.kind === 'url') {
+      quelle.appendChild(field('URL', bind(textInput(src.url || '', (v) => patchEl({ source: { ...src, kind: 'url', url: v } })), (x) => (x.source || {}).url || '')));
+      const g = el('div', 'ed-grid2');
+      g.appendChild(field('Refresh (s)', bind(numInput(src.refreshSec || 60, 2, 86400, 1, (v) => patchEl({ source: { ...src, kind: 'url', refreshSec: v } })), (x) => (x.source || {}).refreshSec || 60)));
+      g.appendChild(field('JSON-Pfad', bind(textInput(src.jsonPath || '', (v) => patchEl({ source: { ...src, kind: 'url', jsonPath: v } })), (x) => (x.source || {}).jsonPath || '')));
+      quelle.appendChild(g);
+    }
+    body.appendChild(U.section({
+      key: 'ov.insp.quelle', title: 'Datenquelle',
+      note: src.kind === 'url' ? 'Externe URL' : '', open: false, body: quelle
     }));
+  }
+
+  // Eine Löschfunktion für Knopf UND Entf-Taste, ein Element oder mehrere.
+  async function deleteSelection() {
+    const o = selOverlay(); const sel = selElements();
+    if (!o || !sel.length) return;
+    const ok = await U.confirmDialog({
+      title: sel.length === 1 ? 'Element löschen?' : `${sel.length} Elemente löschen?`,
+      text: sel.length === 1
+        ? `„${elementTitle(sel[0])}" wird aus „${o.name}" entfernt.`
+        : 'Die ausgewählten Elemente werden aus diesem Overlay entfernt.',
+      confirmLabel: 'Löschen', danger: true
+    });
+    if (!ok) return;
+    for (const e of sel) await api('DELETE', `/api/overlay/${o.id}/element/${e.id}`);
+    selIds = [];
+  }
+
+  // Duplizieren über die vorhandene Anlege-Route: der Server vergibt eine neue
+  // id und normalisiert, alle Typfelder überleben. Leicht versetzt, damit die
+  // Kopie nicht unsichtbar auf dem Original liegt.
+  async function duplicateSelection() {
+    const o = selOverlay(); const sel = selElements();
+    if (!o || !sel.length) return;
+    const made = [];
+    for (const e of sel) {
+      const copy = { ...e };
+      delete copy.id;
+      copy.x = clamp01((e.x || 0) + 0.02, e.w);
+      copy.y = clamp01((e.y || 0) + 0.02, e.h);
+      const c = await api('POST', `/api/overlay/${o.id}/element`, { element: copy });
+      if (c && c.id) made.push(c.id);
+    }
+    if (made.length) { selIds = made; render(); }
   }
 
   function triggerImageUpload() { $('el-image-input').click(); }
@@ -324,7 +437,14 @@
     const o = selOverlay(), e = selElement();
     if (!file || !o || !e) return;
     const fd = new FormData(); fd.append('file', file, file.name || 'bild');
-    await fetch(`/api/overlay/${o.id}/element/${e.id}/image`, { method: 'POST', body: fd });
+    try {
+      const res = await fetch(`/api/overlay/${o.id}/element/${e.id}/image`, { method: 'POST', body: fd });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      U.saved('Bild hochgeladen');
+    } catch (err) {
+      // Vorher schlug ein fehlgeschlagener Upload komplett lautlos fehl.
+      U.toast(`Upload fehlgeschlagen: ${err.message}`, 'err');
+    }
   });
 
   // ---- Canvas =============================================================
@@ -332,10 +452,37 @@
     const canvas = $('ov-canvas');
     canvas.innerHTML = '';
     const o = selOverlay();
+    // Der Hintergrund-Blur wirkt auf der Wand (screen.js), war hier aber nie zu
+    // sehen – der eingestellte Wert blieb reine Zahl.
+    if (o && o.blur > 0) {
+      const bl = el('div', 'ov-blurlayer');
+      bl.style.backdropFilter = `blur(${o.blur}px)`;
+      bl.style.webkitBackdropFilter = `blur(${o.blur}px)`;
+      canvas.appendChild(bl);
+    }
     if (o) for (const e of o.elements) canvas.appendChild(buildEditEl(e));
     scaleStage();
     renderSelbox();
   }
+
+  // ---- Bühnen-Hintergrund -------------------------------------------------
+  // Auf Schwarz sind Transparenz und Blur nicht zu beurteilen; auf der Wand
+  // liegt dort echter Inhalt.
+  (function buildBgSwitch() {
+    const host = $('ov-bg-switch');
+    if (!host) return;
+    const stage = $('ov-stage');
+    const black = btn('Schwarz', 'tiny', () => set(false));
+    const karo = btn('Karo', 'tiny', () => set(true));
+    function set(checker) {
+      stage.classList.toggle('checker', checker);
+      // Der aktive Knopf ist der gefüllte, der andere der stille.
+      black.classList.toggle('ghost', checker);
+      karo.classList.toggle('ghost', !checker);
+    }
+    host.append(el('span', 'ed-keyhint', 'Hintergrund:'), black, karo);
+    set(false);
+  })();
   function updateCanvas() {
     const o = selOverlay(); if (!o) return;
     for (const e of o.elements) {
@@ -409,8 +556,12 @@
 
   function scaleStage() {
     const stage = $('ov-stage'), canvas = $('ov-canvas');
-    const availW = ($('ov-stage').parentElement.clientWidth || window.innerWidth) - 4;
-    const availH = window.innerHeight * 0.82;
+    // Der Platz kommt jetzt aus dem Layout (.ed-stagewrap), nicht mehr aus der
+    // Fensterhöhe – so bestimmt das CSS je Bildschirmbreite, wie groß die Bühne
+    // werden darf, statt dass beides gegeneinander rechnet.
+    const wrap = stage.parentElement;
+    const availW = (wrap.clientWidth || window.innerWidth) - 8;
+    const availH = (wrap.clientHeight || window.innerHeight * 0.8) - 8;
     scale = Math.max(0.02, Math.min(availW / PREVIEW_W, availH / PREVIEW_H));
     stage.style.width = Math.round(PREVIEW_W * scale) + 'px';
     stage.style.height = Math.round(PREVIEW_H * scale) + 'px';
@@ -441,16 +592,24 @@
   // ---- Drag (verschieben) – einzeln mit Snap, mehrere gemeinsam -----------
   function startMove(ev, e, node) {
     ev.preventDefault(); ev.stopPropagation();
+    flushNudge();
     const additive = ev.shiftKey || ev.ctrlKey || ev.metaKey;
-    if (additive) { selectEl(e.id, true); render(); }
-    else if (!selIds.includes(e.id)) { selectEl(e.id, false); render(); }
-    dragging = true;
-    const movers = selElements();
+    // Auswählen erst, wenn nötig: bei gedrückter Zusatztaste entscheidet das
+    // Loslassen, sonst würde ein Klick die Mehrfachauswahl vorzeitig ändern.
+    if (!additive && !selIds.includes(e.id)) { selectEl(e.id, false); render(); }
+    const movers = additive ? [e] : selElements();
     const single = movers.length === 1;
     const sx = ev.clientX, sy = ev.clientY;
     const orig = movers.map((m) => ({ m, x: m.x, y: m.y }));
+    // Auswählen und Ziehen waren dieselbe Geste ohne Schwelle: jeder etwas
+    // ungenaue Klick hat das Element verschoben. 3 px wie in programm.js.
+    let moved = false;
     node.setPointerCapture(ev.pointerId);
     const move = (mv) => {
+      if (!moved) {
+        if (Math.abs(mv.clientX - sx) <= 3 && Math.abs(mv.clientY - sy) <= 3) return;
+        moved = true; dragging = true;
+      }
       const dxf = (mv.clientX - sx) / stageW(), dyf = (mv.clientY - sy) / stageH();
       if (single) {
         const snapped = snapMove(clamp01(orig[0].x + dxf, e.w), clamp01(orig[0].y + dyf, e.h), e.w, e.h, e.id);
@@ -460,25 +619,39 @@
       }
       for (const o2 of orig) { const n = nodeOf(o2.m.id); if (n) styleEditEl(n, o2.m); }
       placeSelboxes();
+      syncInspector();     // X/Y im Inspektor liefen beim Ziehen bisher nie mit
     };
-    const up = async () => {
-      node.removeEventListener('pointermove', move); node.removeEventListener('pointerup', up);
+    const up = () => {
+      node.removeEventListener('pointermove', move);
+      node.removeEventListener('pointerup', up);
+      node.removeEventListener('pointercancel', up);
+      // dragging MUSS auf jedem Weg zurückgesetzt werden – bleibt es hängen,
+      // nimmt render() dauerhaft den Zweig ohne Canvas-Aktualisierung.
       dragging = false; clearGuides();
+      if (!moved) { selectEl(e.id, additive); render(); return; }   // war nur ein Klick
       const o = selOverlay(); if (!o) return;
       for (const o2 of orig) api('PATCH', `/api/overlay/${o.id}/element/${o2.m.id}`, { element: { x: o2.m.x, y: o2.m.y } });
     };
-    node.addEventListener('pointermove', move); node.addEventListener('pointerup', up);
+    node.addEventListener('pointermove', move);
+    node.addEventListener('pointerup', up);
+    node.addEventListener('pointercancel', up);
   }
 
   // ---- Resize -------------------------------------------------------------
   function startResize(ev, e, dir) {
     ev.preventDefault(); ev.stopPropagation();
-    dragging = true;
+    flushNudge();
     const sx = ev.clientX, sy = ev.clientY;
     const o = { x: e.x, y: e.y, w: e.w, h: e.h };
     const node = $('ov-canvas').querySelector(`[data-id="${e.id}"]`);
-    ev.target.setPointerCapture(ev.pointerId);
+    const target = ev.target;
+    let moved = false;
+    target.setPointerCapture(ev.pointerId);
     const move = (m) => {
+      if (!moved) {
+        if (Math.abs(m.clientX - sx) <= 3 && Math.abs(m.clientY - sy) <= 3) return;
+        moved = true; dragging = true;
+      }
       const dx = (m.clientX - sx) / stageW(), dy = (m.clientY - sy) / stageH();
       let { x, y, w, h } = o;
       if (dir.includes('e')) w = o.w + dx;
@@ -489,13 +662,19 @@
       x = Math.max(0, Math.min(1 - w, x)); y = Math.max(0, Math.min(1 - h, y));
       e.x = x; e.y = y; e.w = w; e.h = h;
       styleEditEl(node, e); placeSelboxes();
+      syncInspector();
     };
     const up = () => {
-      ev.target.removeEventListener('pointermove', move); ev.target.removeEventListener('pointerup', up);
+      target.removeEventListener('pointermove', move);
+      target.removeEventListener('pointerup', up);
+      target.removeEventListener('pointercancel', up);
       dragging = false;
+      if (!moved) return;                  // Griff nur angetippt: nichts senden
       patchEl({ x: e.x, y: e.y, w: e.w, h: e.h });
     };
-    ev.target.addEventListener('pointermove', move); ev.target.addEventListener('pointerup', up);
+    target.addEventListener('pointermove', move);
+    target.addEventListener('pointerup', up);
+    target.addEventListener('pointercancel', up);
   }
 
   function placeSelboxes() {
@@ -542,15 +721,75 @@
   function clearGuides() { $('ov-stage').querySelectorAll('.ed-guide').forEach((n) => n.remove()); }
 
   // Klick auf leere Bühne hebt Auswahl auf.
-  $('ov-stage').addEventListener('pointerdown', (ev) => { if (ev.target === $('ov-stage') || ev.target === $('ov-canvas')) { selIds = []; render(); } });
+  $('ov-stage').addEventListener('pointerdown', (ev) => {
+    // Anstehende Pfeiltasten-Verschiebung sichern, bevor etwas anderes passiert.
+    flushNudge();
+    // Sonst bleibt der Fokus nach dem Editieren eines Zahlenfelds dort liegen
+    // und die Entf-Taste greift nicht.
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    if (ev.target === $('ov-stage') || ev.target === $('ov-canvas')) { selIds = []; render(); }
+  });
+
+  // ---- Tastatur ===========================================================
+  // Pfeiltasten verschieben lokal und schreiben gebündelt zurück – sonst
+  // entstünde pro Tastendruck ein Request.
+  let nudgeTimer = null, nudgeIds = new Set();
+  function flushNudge() {
+    clearTimeout(nudgeTimer); nudgeTimer = null;
+    const o = selOverlay();
+    if (!o || !nudgeIds.size) { nudgeIds.clear(); return; }
+    for (const id of nudgeIds) {
+      const e = o.elements.find((x) => x.id === id);
+      if (e) api('PATCH', `/api/overlay/${o.id}/element/${e.id}`, { element: { x: e.x, y: e.y } });
+    }
+    nudgeIds.clear();
+  }
+  function nudge(dx, dy) {
+    const sel = selElements(); if (!sel.length) return;
+    for (const e of sel) {
+      e.x = clamp01(e.x + dx, e.w); e.y = clamp01(e.y + dy, e.h);
+      const n = nodeOf(e.id); if (n) styleEditEl(n, e);
+      nudgeIds.add(e.id);
+    }
+    placeSelboxes(); syncInspector();
+    clearTimeout(nudgeTimer);
+    nudgeTimer = setTimeout(flushNudge, 300);
+  }
+  window.addEventListener('beforeunload', flushNudge);
+
+  const isTyping = (t) => !!t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
+  document.addEventListener('keydown', (ev) => {
+    // Nicht ins Tippen funken, und Dialoge behalten ihre eigenen Tasten
+    // (U.dialog lauscht in der Capture-Phase auf Esc und Tab).
+    // Geprüft wird beides: das Ziel des Ereignisses UND wo der Fokus steht –
+    // sonst genügt ein umgeleitetes Ereignis, um im Feld zu löschen.
+    if (isTyping(ev.target) || isTyping(document.activeElement) || document.querySelector('.modal')) return;
+    if (!selOverlay()) return;
+    const mod = ev.ctrlKey || ev.metaKey;
+
+    if (mod && (ev.key === 'd' || ev.key === 'D')) { ev.preventDefault(); duplicateSelection(); return; }
+    if (mod && (ev.key === 'a' || ev.key === 'A')) {
+      ev.preventDefault();
+      selIds = selOverlay().elements.map((e) => e.id); render();
+      return;
+    }
+    if (mod) return;
+
+    if (ev.key === 'Delete' || ev.key === 'Backspace') { ev.preventDefault(); deleteSelection(); return; }
+    if (ev.key === 'Escape') { ev.preventDefault(); selIds = []; render(); return; }
+
+    const step = ev.shiftKey ? 0.02 : 0.0025;
+    if (ev.key === 'ArrowLeft') { ev.preventDefault(); nudge(-step, 0); }
+    else if (ev.key === 'ArrowRight') { ev.preventDefault(); nudge(step, 0); }
+    else if (ev.key === 'ArrowUp') { ev.preventDefault(); nudge(0, -step); }
+    else if (ev.key === 'ArrowDown') { ev.preventDefault(); nudge(0, step); }
+  });
   window.addEventListener('resize', () => { scaleStage(); renderSelbox(); });
 
   // ---- Bibliothek (wiederverwertbare Vorlagen) ---------------------------
   function renderLibrary() {
-    const sel = selElements();
-    const saveBtn = $('lib-save');
-    saveBtn.hidden = sel.length < 1;
-    saveBtn.textContent = sel.length > 1 ? `＋ Gruppe (${sel.length}) in Bibliothek` : '＋ Auswahl in Bibliothek';
+    // Reine Liste: das Speichern liegt im Inspektor, also dort, wo die Auswahl
+    // ist, die gespeichert werden soll.
     const list = $('lib-list'); list.innerHTML = '';
     if (!library().length) { list.innerHTML = '<div class="ed-empty-hint">Noch keine Vorlagen. Element auswählen und speichern.</div>'; return; }
     library().forEach((en) => {
@@ -576,7 +815,7 @@
       list.appendChild(row);
     });
   }
-  $('lib-save').addEventListener('click', async () => {
+  async function saveSelectionToLibrary() {
     const sel = selElements(); if (!sel.length) return;
     const strip = (e) => { const c = { ...e }; delete c.id; return c; };
     const single = sel.length === 1;
@@ -590,7 +829,7 @@
     const name = res.value || (single ? 'Vorlage' : `Gruppe (${sel.length})`);
     if (single) await api('POST', '/api/library', { name, kind: 'element', element: strip(sel[0]) });
     else await api('POST', '/api/library', { name, kind: 'group', elements: sel.map(strip) });
-  });
+  }
 
   // ---- kleine Helfer ------------------------------------------------------
   // Die Formular-Bausteine (el/hr/field/textInput/…) liegen jetzt in ui.js und

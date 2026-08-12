@@ -134,6 +134,7 @@ html, body {
 @media (prefers-reduced-motion: reduce) {
   .go-live.pending, .onair-dot { animation: none; }
   .toast { animation: none !important; }
+  .sect > summary::before { transition: none; }
 }
 
 /* ===== Fußzeile ========================================================== */
@@ -234,6 +235,28 @@ input[type="color"] {
 /* Validierung am Ort der Eingabe, nicht als Toast. */
 .field-error { color: var(--danger); font-size: 13px; margin-top: -4px; }
 input.invalid, select.invalid { border-color: var(--danger); }
+
+/* ===== Einklappbarer Abschnitt (UI.section) ============================= */
+/* Gruppiert Felder: der Overlay-Inspektor und "Weitere Optionen" auf
+   /playlists nutzen dieselbe Mechanik. Natives <details>. */
+.sect { border: 1px solid var(--border); border-radius: var(--r-m); background: var(--panel-2); }
+.sect + .sect { margin-top: 8px; }
+.sect > summary {
+  list-style: none; cursor: pointer;
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 11px; min-height: 40px;   /* Fingerbreite Trefferfläche */
+  font-size: 13px; font-weight: 600; color: var(--text);
+}
+.sect > summary::-webkit-details-marker { display: none; }
+.sect > summary::before {
+  content: "▸"; color: var(--muted); flex: 0 0 auto;
+  transition: transform 0.15s ease;
+}
+.sect[open] > summary::before { transform: rotate(90deg); }
+.sect > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.sect-title { flex: 1 1 auto; min-width: 0; }
+.sect-note { margin-left: auto; color: var(--muted); font-size: 12px; font-weight: 400; }
+.sect-body { padding: 2px 11px 12px; display: flex; flex-direction: column; gap: 10px; }
 
 /* ===== Typ-Kacheln ("Inhalt hinzufügen") ================================ */
 .type-grid {

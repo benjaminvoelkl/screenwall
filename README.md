@@ -140,7 +140,8 @@ public/
   css/base.css         Design-Tokens + gemeinsame Bausteine (alle Steuer-Seiten)
   css/control.css  css/programm.css  css/overlay.css  css/monitor.css  css/screen.css
   js/ui.js             Gemeinsames UI-Fundament: Dialoge, Toasts, Formularfelder,
-                       Slide-to-confirm, WebSocket, Navigation, Entwurfs-Leiste
+                       einklappbare Abschnitte (UI.section), Slide-to-confirm,
+                       WebSocket, Navigation, Entwurfs-Leiste
   js/content.js        Content-Typ-Register (Typen, Felder, Dauern, Filmstreifen)
   js/programm.js   js/playlists.js   js/overlay.js    js/monitor.js    js/screen.js
 ```
@@ -152,6 +153,16 @@ quittiert; Bestätigungen und Eingaben laufen über eigene Dialoge (kein
 `alert`/`confirm`/`prompt`). Inhaltstypen kommen aus **einem** Register
 (`js/content.js`) – dort ergänzt, wirkt ein neuer Typ überall: im
 „Inhalt hinzufügen"-Dialog, in den Feldern je Eintrag, im Storyboard und in der Timeline.
+
+**Playlists:** „+ Neue Playlist" legt sofort an und öffnet die Playlist mit
+markiertem Namen – kein Zwischendialog. Selten Gebrauchtes (KI-Kontext für Suche
+und LLM-Auswahl, Verhalten am Ende) liegt unter „Weitere Optionen".
+
+**Overlay-Editor:** drei Bereiche – links die Listen, in der Mitte die Bühne,
+rechts ein kontextabhängiger Inspektor (ohne Elementauswahl zeigt er die
+Overlay-Einstellungen). Listen und Inspektor scrollen getrennt; die Felder sind
+in einklappbare Abschnitte gruppiert. Tastatur: Entf löscht, Pfeile verschieben
+(⇧ grob), Strg+D dupliziert, Esc hebt die Auswahl auf.
 
 ## API (intern)
 

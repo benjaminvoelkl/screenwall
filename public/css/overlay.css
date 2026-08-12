@@ -1,15 +1,50 @@
 /* Overlay-Canvas-Editor (/overlay). Baut auf base.css auf (Kopfzeile, Buttons,
    Formularfelder, Dialoge) und ergänzt Editor-Layout, Canvas und Snap-Linien. */
 
-.ed-layout { display: flex; align-items: flex-start; gap: 16px; padding: 16px 20px; max-width: 1500px; margin: 0 auto; }
-.ed-side {
-  flex: 0 0 340px; max-height: calc(100vh - 90px); overflow-y: auto;
-  display: flex; flex-direction: column; gap: 14px;
+/* Drei Bereiche mit klarer Aufgabe: links WAS es gibt (Listen), in der Mitte
+   WIE es aussieht (Bühne), rechts WELCHE Eigenschaften das Gewählte hat.
+   Listen und Inspektor scrollen getrennt – vorher lagen sie in einem einzigen
+   Scrollbereich, sodass die Liste beim Blättern in den Feldern wegrutschte. */
+.ed-layout {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr) 330px;
+  grid-template-areas: "side main insp";
+  gap: 14px; padding: 12px 16px; max-width: 1900px; margin: 0 auto;
+  height: calc(100vh - 76px);
 }
-.ed-main { flex: 1 1 auto; min-width: 0; display: flex; justify-content: center; }
+/* minmax(0,1fr) ist tragend: mit schlichtem 1fr bläht die 4320px breite
+   .ov-canvas die mittlere Spalte auf und schiebt den Inspektor aus dem Bild. */
+.ed-side { grid-area: side; display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+.ed-main { grid-area: main; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.ed-insp {
+  grid-area: insp; display: flex; flex-direction: column; min-height: 0;
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-l);
+}
+.ed-insp-head { padding: 12px 12px 10px; border-bottom: 1px solid var(--border); }
+.ed-insp-title { font-weight: 700; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+.ed-insp-title .ed-tag { font-weight: 400; }
+.ed-insp-acts { display: flex; gap: 6px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+.ed-insp-body { padding: 12px; overflow-y: auto; flex: 1 1 auto; min-height: 0; }
+.ed-scroll { overflow-y: auto; min-height: 0; }
 
-.ed-box { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+/* Bühne füllt die mittlere Spalte; die Leiste darunter trägt Hintergrund-
+   Umschalter und Tastaturhinweis. */
+.ed-stagewrap { flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center; }
+.ed-canvasbar { display: flex; align-items: center; gap: 12px; padding: 8px 2px 0; flex-wrap: wrap; }
+.ed-keyhint { color: var(--muted); font-size: 12px; }
+.ed-addrow { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+
+.ed-box {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px;
+  display: flex; flex-direction: column; min-height: 0;
+}
+.ed-box-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.ed-box-head h3 { margin: 0; }
+.ed-box-els { flex: 1 1 auto; }             /* Elementliste bekommt den Restplatz */
+.ed-box-ovs #ov-list { max-height: 24vh; }
+.ed-box-lib #lib-list { max-height: 22vh; }
 .ed-box h3 { margin: 0 0 10px; font-size: 15px; }
+.ed-list { margin-bottom: 0; }
 .ed-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .ed-row + .ed-row { margin-top: 8px; }
 .ed-muted { color: var(--muted); font-size: 12px; }
@@ -26,6 +61,7 @@
 .ed-item input[type="checkbox"] { cursor: pointer; }
 .ed-item.disabled .ed-name { color: var(--muted); }
 
+.ed-fields { display: flex; flex-direction: column; gap: 10px; }
 .ed-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
 .ed-field input[type="text"], .ed-field input[type="number"], .ed-field select, .ed-field textarea { width: 100%; }
 .ed-field.inline { flex-direction: row; align-items: center; gap: 6px; }
@@ -74,3 +110,60 @@
 .ed-guide.h { height: 1px; left: 0; right: 0; }
 
 .ed-empty-hint { color: var(--muted); font-size: 13px; padding: 6px 2px; }
+
+/* Karo-Hintergrund: auf schwarzem Grund lassen sich Transparenz und Blur
+   nicht beurteilen (die Wand zeigt dort echten Inhalt). */
+.ov-stage.checker {
+  background-color: #4a4a4a;
+  background-image:
+    linear-gradient(45deg, #666 25%, transparent 25%, transparent 75%, #666 75%),
+    linear-gradient(45deg, #666 25%, transparent 25%, transparent 75%, #666 75%);
+  background-size: 32px 32px;
+  background-position: 0 0, 16px 16px;
+}
+/* Vorschau des overlay-weiten Hintergrund-Blurs (die Wand wendet ihn an). */
+.ov-blurlayer { position: absolute; inset: 0; z-index: 0; pointer-events: none; }
+
+/* ===== Bedienung auf Tablets ============================================ */
+/* Nur Elemente und Griffe fangen die Geste ab. Käme touch-action:none auf
+   .ov-stage, ließe sich die gestapelte Ansicht über der Bühne nicht scrollen. */
+.ed-el, .ed-handle { touch-action: none; }
+
+@media (pointer: coarse) {
+  .ed-handle { width: 18px; height: 18px; }
+  .ed-handle.nw { left: -9px; top: -9px; }
+  .ed-handle.ne { right: -9px; top: -9px; }
+  .ed-handle.sw { left: -9px; bottom: -9px; }
+  .ed-handle.se { right: -9px; bottom: -9px; }
+  .ed-handle.n { top: -9px; margin-left: -9px; }
+  .ed-handle.s { bottom: -9px; margin-left: -9px; }
+  .ed-handle.w { left: -9px; margin-top: -9px; }
+  .ed-handle.e { right: -9px; margin-top: -9px; }
+}
+
+/* Tablet quer (~1024px): Listen wandern als Streifen nach oben, damit der
+   Inspektor NEBEN der Bühne stehen bleibt. */
+@media (max-width: 1279px) {
+  .ed-layout {
+    grid-template-columns: minmax(0, 1fr) 320px;
+    grid-template-areas: "side side" "main insp";
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .ed-side { flex-direction: row; gap: 10px; }
+  .ed-side .ed-box { flex: 1 1 0; min-width: 0; }
+  .ed-box-ovs #ov-list, .ed-box-lib #lib-list, .ed-box-els #el-list { max-height: 150px; }
+}
+
+/* Hochkant: eine Spalte, die Seite scrollt wieder normal. */
+@media (max-width: 899px) {
+  .ed-layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "side" "main" "insp";
+    grid-template-rows: none;
+    height: auto;
+  }
+  .ed-side { flex-direction: column; }
+  .ed-stagewrap { height: 56vh; }
+  .ed-insp-body { overflow: visible; }
+  .ed-box-ovs #ov-list, .ed-box-lib #lib-list, .ed-box-els #el-list { max-height: 200px; }
+}

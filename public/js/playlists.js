@@ -18,6 +18,7 @@
   const detailMode = !!editId;
   let selectedId = editId;      // im Detail-Modus die bearbeitete Playlist
   let liveNowPlaying = null;    // Was läuft gerade live auf der Wand?
+  let lastPlSig = null;         // Signatur des zuletzt gezeichneten Zustands
 
   const playlists = () => state.playlists;
   const selPl = () => playlists().byId[selectedId] || playlists().byId[playlists().rootId];
@@ -34,12 +35,24 @@
   U.connectState({
     onConn: U.bindConnDot(),
     onDirty: (dirty) => draft.update({ dirty, show: dirty }),
-    onState: (s) => { state = s; render(); },
+    onState: (s) => {
+      // Der Server sendet bei JEDER Änderung (auch aus anderen Tabs) den ganzen
+      // Zustand. Nur neu zeichnen, wenn sich an den Playlists wirklich etwas
+      // geändert hat – sonst reißt es Scrollposition und Fokus weg.
+      const sig = playlistSig(s);
+      const changed = sig !== lastPlSig;
+      lastPlSig = sig;
+      state = s;
+      if (changed) render();
+    },
     onCmd: (msg) => {
       if (msg.cmd !== 'nowplaying') return;
       liveNowPlaying = msg;
       applyLiveNow();
-      if (!detailMode) renderOverview();   // Live-Abzeichen der Karten aktualisieren
+      // Früher wurde hier die ganze Übersicht neu gebaut – einmal pro Sekunde,
+      // was jedes Scrollen sofort wieder nach oben riss. Die Abzeichen lassen
+      // sich am bestehenden DOM ändern.
+      applyLiveOverview();
     }
   });
   U.api('GET', '/api/state', undefined, { quiet: true })
@@ -57,51 +70,16 @@
   U.api('POST', '/api/probe-durations', undefined, { quiet: true }).catch(() => {});
 
   // ===== Playlist-Verwaltung ==============================================
-  // EIN Dialog fragt alles ab, was eine neue Playlist braucht. Danach geht es
-  // direkt an die Inhalte – dieselben Felder werden nicht erneut abgefragt.
-  $('pl-new').addEventListener('click', () => {
+  // Kein Dialog: Anlegen und Bearbeiten waren zwei Etappen, die dieselben drei
+  // Felder abgefragt haben. Der Knopf legt jetzt direkt an und öffnet die
+  // Detailseite mit markiertem Namen – Name, KI-Kontext und Nachfolge-Aktion
+  // stehen dort, an genau einer Stelle.
+  $('pl-new').addEventListener('click', async () => {
     const n = Object.keys(playlists().byId).length + 1;
-    const name = U.textInput(`Playlist ${n}`);
-    const desc = U.textInput('');
-    desc.placeholder = 'kurz beschreiben, was drin ist (optional)';
-    const after = U.selectInput([
-      ['loop', 'Wiederholen (Loop)'],
-      ['stop', 'Stoppen (Standbild)'],
-      ['next', 'Nächste Playlist abspielen']
-    ], 'loop');
-
-    const body = U.el('div', 'dlg-fields');
-    body.append(
-      U.field('Name', name),
-      U.field('Beschreibung', desc),
-      U.field('Wenn die Playlist endet', after),
-      U.el('p', 'hint', 'Inhalte kommen im nächsten Schritt dazu.')
-    );
-
-    U.dialog({
-      title: 'Neue Playlist',
-      body,
-      actions: [
-        { label: 'Abbrechen', cls: 'ghost', onClick: (h) => h.close() },
-        {
-          label: 'Anlegen',
-          onClick: async (h) => {
-            h.close();
-            try {
-              const pl = await U.api('POST', '/api/playlist', { name: name.value.trim() || `Playlist ${n}` });
-              if (!pl || !pl.id) return;
-              if (desc.value.trim()) {
-                await U.api('POST', `/api/playlist/${pl.id}/rename`, { description: desc.value.trim() });
-              }
-              if (after.value !== 'loop') {
-                await U.api('POST', `/api/playlist/${pl.id}/after`, { after: after.value, nextId: null });
-              }
-              location.href = '/playlists?edit=' + pl.id;
-            } catch (_) {}
-          }
-        }
-      ]
-    });
+    try {
+      const pl = await U.api('POST', '/api/playlist', { name: `Playlist ${n}` });
+      if (pl && pl.id) location.href = `/playlists?edit=${pl.id}&neu=1`;
+    } catch (_) {}
   });
 
   // Umbenennen direkt im Titel: Eingabe speichert beim Verlassen/Enter.
@@ -120,6 +98,46 @@
       if (e.key === 'Escape') { nameInput.value = selPl().name; nameInput.blur(); }
     });
   }
+  // Frisch angelegt (?neu=1): der Name ist der einzige noch offene Punkt, also
+  // gleich hineinspringen und markieren – tippen genügt.
+  const isNew = new URLSearchParams(location.search).get('neu') === '1';
+  let nameFocused = false;
+
+  // ---- "Weitere Optionen": KI-Kontext + Nachfolge-Aktion ------------------
+  // Beides wird selten angefasst und stand vorher doppelt (Anlege-Dialog UND
+  // Detailseite). Jetzt einmal, eingeklappt. Die Felder tragen dieselben IDs
+  // wie zuvor, damit die Handler unten unverändert bleiben.
+  (function buildMoreOptions() {
+    const host = $('pl-more');
+    if (!host) return;
+
+    const desc = U.textInput('');
+    desc.id = 'pl-desc';
+    desc.placeholder = 'z. B. „PV-Anlagen Referenzen"';
+    const descField = U.field('KI-Kontext', desc);
+    descField.appendChild(U.el('span', 'hint-inline',
+      'Hilft beim Suchen und wenn eine KI die passende Playlist auswählen soll.'));
+
+    const after = U.selectInput([
+      ['loop', 'Wiederholen (Loop)'],
+      ['stop', 'Stoppen (Standbild)'],
+      ['next', 'Nächste Playlist abspielen']
+    ], 'loop');
+    after.id = 'pl-after';
+
+    const next = U.el('select');
+    next.id = 'pl-next';
+    const nextWrap = U.field('Nächste Playlist', next);
+    nextWrap.id = 'pl-next-wrap';
+    nextWrap.classList.add('hidden');
+
+    const row = U.el('div', 'row after-row');
+    row.append(U.field('Wenn die Playlist endet', after), nextWrap);
+
+    const body = U.el('div', 'pl-more-body');
+    body.append(descField, row);
+    host.appendChild(U.section({ key: 'pl.more', title: 'Weitere Optionen', open: false, body }));
+  })();
 
   $('pl-desc').addEventListener('change', () => {
     const pl = selPl();
@@ -353,6 +371,7 @@
     U.setIfNotFocused($('pl-name'), pl.name);
     U.setIfNotFocused($('pl-desc'), pl.description || '');
     $('pl-root-badge').classList.toggle('hidden', !isRoot(pl));
+    if (isNew && !nameFocused) { nameFocused = true; $('pl-name').focus(); $('pl-name').select(); }
 
     renderDetailActions(pl);
 
@@ -397,9 +416,15 @@
   function renderOverview() {
     showMode(false);
     const cards = $('pl-cards');
-    cards.innerHTML = '';
+    // Reihenfolge ist wichtig: erst messen, dann bauen, dann in EINEM Zug
+    // tauschen. Wird vorher geleert, fällt die Dokumenthöhe auf 0, der Browser
+    // klemmt scrollY auf 0 – und die Seite springt nach oben.
     const avail = storyboardWidth();
-    for (const pl of Object.values(playlists().byId)) cards.appendChild(buildPlaylistCard(pl, avail));
+    const y = window.scrollY;
+    const frag = document.createDocumentFragment();
+    for (const pl of Object.values(playlists().byId)) frag.appendChild(buildPlaylistCard(pl, avail));
+    cards.replaceChildren(frag);
+    if (window.scrollY !== y) window.scrollTo(0, y);
   }
 
   // Innenbreite, die einer Storyboard-Zeitleiste zur Verfügung steht: Kartenbreite
@@ -419,6 +444,7 @@
   function buildPlaylistCard(pl, avail) {
     const start = isRoot(pl), live = isLive(pl);
     const card = U.el('div', 'pl-card' + (start ? ' is-start' : '') + (live ? ' is-live' : ''));
+    card.dataset.plId = pl.id;   // damit applyLiveOverview() die Karte wiederfindet
 
     const head = U.el('div', 'pl-card-head');
     const title = U.el('div', 'pl-card-title');
@@ -434,7 +460,8 @@
     head.append(title, meta);
     card.appendChild(head);
 
-    if (pl.description) card.appendChild(U.el('div', 'pl-card-desc', pl.description));
+    // Der KI-Kontext ist Kontext für die Suche/LLM, keine Bildunterschrift –
+    // auf den Karten stand er nur im Weg.
 
     // px pro Sekunde, sodass die Playlist genau die Kartenbreite füllt.
     card.appendChild(buildStoryboard(seq, total > 0 ? avail / total : 0));
@@ -509,11 +536,26 @@
   // ----- Einträge der Playlist --------------------------------------------
   function renderItems(pl) {
     const ul = $('pl-items');
-    ul.innerHTML = '';
-    for (const item of pl.items) ul.appendChild(buildItemEl(item));
+    // Die Felder je Eintrag (Name, Dauer, …) werden hier komplett neu gebaut.
+    // Passiert das, während jemand darin tippt, ist der Fokus weg und die
+    // Eingabe halb verloren. Also verschieben, bis das Feld verlassen wird.
+    if (ul.contains(document.activeElement)) {
+      if (!pendingItems) {
+        pendingItems = true;
+        ul.addEventListener('focusout', () => {
+          pendingItems = false;
+          // Erst nachdem der Fokus wirklich draußen ist (focusout feuert vor
+          // dem Setzen des neuen activeElement).
+          setTimeout(() => { if (state && detailMode && !ul.contains(document.activeElement)) renderDetail(); }, 0);
+        }, { once: true });
+      }
+      return;
+    }
+    ul.replaceChildren(...pl.items.map(buildItemEl));
     enableDragReorder(ul, () => saveItemOrder(Array.from(ul.children).map((c) => c.dataset.id)));
     applyLiveNow();
   }
+  let pendingItems = false;
 
   function buildItemEl(item) {
     const li = U.el('li', 'media-item');
@@ -616,6 +658,36 @@
   }
 
   // ===== Live-Hervorhebung (roter Rahmen für den Wand-Content) ============
+  // Was die Seite zeichnet, hängt nur hieran. Ändert sich die Signatur nicht,
+  // muss auch nichts neu gebaut werden (Lautstärke, Overlays, fremde Felder
+  // lösen sonst ein Neuzeichnen aus, das Scrollposition und Fokus kostet).
+  // Die Inhalte hängen verschachtelt in den Einträgen (items[].content), es gibt
+  // keine flache contents-Liste. Statt einzelne Felder aufzuzählen und dabei
+  // eines zu vergessen, wird der ganze playlists-Teilbaum verglichen – alles,
+  // was diese Seite zeichnet, steckt darin. Overlays und Bibliothek nicht,
+  // deren Änderungen sollen hier auch nichts neu bauen.
+  function playlistSig(s) {
+    return s && s.playlists ? JSON.stringify(s.playlists) : '';
+  }
+
+  // Live-Abzeichen der Übersichtskarten am bestehenden DOM ändern, statt die
+  // Karten neu zu bauen. Läuft im Sekundentakt – darf also nichts umbauen.
+  function applyLiveOverview() {
+    const host = $('pl-cards');
+    if (!host || detailMode || !state) return;
+    for (const card of host.children) {
+      const pl = playlists().byId[card.dataset.plId];
+      const live = !!pl && isLive(pl);
+      if (card.classList.contains('is-live') === live) continue;
+      card.classList.toggle('is-live', live);
+      const title = card.querySelector('.pl-card-title');
+      if (!title) continue;
+      const badge = title.querySelector('.badge.live');
+      if (live && !badge) title.appendChild(U.el('span', 'badge live', '● Live'));
+      else if (!live && badge) badge.remove();
+    }
+  }
+
   function applyLiveNow() {
     const np = liveNowPlaying;
     const ul = $('pl-items');

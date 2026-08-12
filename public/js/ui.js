@@ -319,6 +319,32 @@
     return wrap;
   }
 
+  // ===== Einklappbarer Abschnitt ===========================================
+  // Gruppiert Formularfelder, damit lange Feldlisten (Overlay-Inspektor) und
+  // selten gebrauchte Felder ("Weitere Optionen" auf /playlists) nicht alles
+  // auf einmal zeigen. Basis ist natives <details>: Tastatur- und
+  // Screenreader-Verhalten gibt es damit geschenkt.
+  //
+  // Der Auf-/Zu-Zustand liegt bewusst NEBEN dem DOM: die Seiten bauen ihre
+  // Panels bei jedem Server-Push neu auf, ein Zustand im Element selbst wäre
+  // danach weg. Über `key` findet der Abschnitt seinen Zustand wieder.
+  const sectionOpen = new Map();
+  function section({ key, title, note, open = true, body } = {}) {
+    const d = el('details', 'sect');
+    const sum = el('summary');
+    sum.appendChild(el('span', 'sect-title', title || ''));
+    if (note) sum.appendChild(el('span', 'sect-note', note));
+    d.appendChild(sum);
+
+    const inner = el('div', 'sect-body');
+    if (body) inner.appendChild(body);
+    d.appendChild(inner);
+
+    d.open = key && sectionOpen.has(key) ? sectionOpen.get(key) : !!open;
+    if (key) d.addEventListener('toggle', () => sectionOpen.set(key, d.open));
+    return d;
+  }
+
   // ===== Slide-to-confirm ==================================================
   // Eine Implementierung für alle drei Einsatzorte (Go Live, Playlist abspielen,
   // Sendung stoppen). Erwartet die Struktur aus base.css:
@@ -539,7 +565,7 @@
     $, el, hr, field, textInput, textArea, numInput, colorInput, checkboxInput,
     rangeInput, selectInput, btn, iconBtn, checkboxRow,
     toast, saved, api, save,
-    dialog, confirmDialog, promptDialog, overflowMenu,
+    dialog, confirmDialog, promptDialog, overflowMenu, section,
     buildSlide, bindSlide,
     connectState, bindConnDot, topbarNav, draftBar, bindVolume,
     fmtClock, escapeHtml, setIfNotFocused, normalizeUrl, parseYoutubeId
