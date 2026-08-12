@@ -90,7 +90,8 @@
 .pl-fr.sb { background-repeat: no-repeat; }
 
 /* ===== Playlist-Detail ===== */
-.pl-detail-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
+/* Trägt nur noch Rückweg + Aktionen; Name und Hinzufügen sitzen in der Karte. */
+.pl-detail-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
 .pl-detail-head h2 { margin: 0; font-size: 18px; }
 .pl-detail-actions { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; align-items: center; }
 
@@ -117,12 +118,15 @@
 .after-row { align-items: flex-end; }
 .after-row select { min-width: 220px; }
 
-/* Ein einziger Einstiegspunkt zum Hinzufügen (früher: 7 Schaltflächen, 3 Textfelder,
-   eine Checkbox und eine Auswahlliste in einer umbrechenden Zeile). */
-.add-row {
+/* Kopf der Inhalts-Karte: Name links als Überschrift, Hinzufügen rechts oben.
+   Der Knopf bleibt am rechten Rand, der Name nimmt den Rest und kürzt bei
+   Bedarf – auf schmalen Geräten rutscht der Knopf in die nächste Zeile. */
+.pl-panel-head {
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-  margin: 4px 0 16px; padding-bottom: 16px; border-bottom: 1px solid var(--border);
+  margin: 0 0 16px; padding-bottom: 16px; border-bottom: 1px solid var(--border);
 }
+.pl-panel-head .pl-name-edit { flex: 1 1 12ch; min-width: 0; }
+.pl-panel-head #pl-add { margin-left: auto; flex: 0 0 auto; }
 
 /* ===== Einträge einer Playlist ===== */
 .media-list { list-style: none; padding: 0; margin: 8px 0 0; display: flex; flex-direction: column; gap: 8px; }

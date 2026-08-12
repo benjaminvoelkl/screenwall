@@ -35,20 +35,22 @@
 
     <!-- Detail / Bearbeiten einer einzelnen Playlist -->
     <section id="pl-detail" class="pl-detail" hidden>
+      <!-- Über der Karte bleibt nur, was nicht die Playlist selbst ist:
+           der Rückweg und die Aktionen auf die ganze Playlist. -->
       <div class="pl-detail-head">
         <a class="back-link" href="/playlists" title="Zur Übersicht">← Übersicht</a>
-        <!-- Umbenennen geschieht direkt hier im Titel (früher: Button + prompt). -->
-        <input type="text" id="pl-name" class="pl-name-edit" aria-label="Name der Playlist" />
-        <span id="pl-root-badge" class="badge start hidden">★ Start</span>
         <span class="pl-detail-actions" id="pl-detail-actions"></span>
       </div>
       <section class="pl-panel">
-        <!-- EIN Einstieg zum Hinzufügen: der Dialog fragt danach den Typ ab und
-             zeigt nur die passenden Felder (siehe content.js / CT.buildAddForm). -->
-        <div class="add-row">
-          <button id="pl-add" class="btn">+ Inhalt hinzufügen</button>
-          <span class="hint" style="margin:0">Bild, Video, YouTube, Webseite, Bildschirm,
-            externer Stream, Farbe oder eine andere Playlist.</span>
+        <!-- Der Name ist die Überschrift der Karte; rechts oben der einzige
+             Einstieg zum Hinzufügen. Umbenannt wird direkt im Titel.
+             Welche Typen es gibt, steht als Tooltip am Knopf – die Auswahl
+             zeigt es ohnehin gleich als Kacheln (content.js / CT.TYPES). -->
+        <div class="pl-panel-head">
+          <input type="text" id="pl-name" class="pl-name-edit" aria-label="Name der Playlist" />
+          <span id="pl-root-badge" class="badge start hidden">★ Start</span>
+          <button id="pl-add" class="btn"
+            title="Bild, Video, YouTube, Webseite, Bildschirm, externer Stream, Farbe oder eine andere Playlist.">+ Inhalt hinzufügen</button>
         </div>
 
         <ul id="pl-items" class="media-list"></ul>
