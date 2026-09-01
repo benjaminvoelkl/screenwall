@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Screenwall">
+  <!-- Vektor-Favicon. Gleiche Geometrie wie tools/make-icons.py (PNG/ICO). -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#232a3a"/><stop offset="1" stop-color="#0d0f14"/>
+    </linearGradient>
+    <linearGradient id="screen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#639bff"/><stop offset="1" stop-color="#2b62d8"/>
+    </linearGradient>
+    <linearGradient id="idle" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#495163"/><stop offset="1" stop-color="#333948"/>
+    </linearGradient>
+    <linearGradient id="live" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f23b40"/><stop offset="1" stop-color="#d4141a"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="512" height="512" rx="112.6" fill="url(#tile)"/>
+
+  <!-- Grosser Screen mit Play-Dreieck -->
+  <rect x="76.8" y="152.1" width="234.7" height="207.9" rx="26.9" fill="url(#screen)"/>
+  <path d="M159.6 208.2 V303.8 L241.9 256 Z" fill="#fff"/>
+
+  <!-- Rechte Spalte: ruhendes Panel + On Air -->
+  <rect x="331.2" y="152.1" width="103.9" height="94.1" rx="26.9" fill="url(#idle)"/>
+  <rect x="331.2" y="265.9" width="103.9" height="94.1" rx="26.9" fill="url(#live)"/>
+</svg>

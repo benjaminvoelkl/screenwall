@@ -64,6 +64,22 @@ Der Server lauscht auf `0.0.0.0`, ist also im gesamten LAN erreichbar. Mehrere
 
 Port ändern: `PORT=8080 npm start`.
 
+### App-Icon / Als App installieren
+
+Alle Seiten liefern Favicon, Apple-Touch-Icon und ein Web-App-Manifest
+(`public/manifest.webmanifest`), Steuer-Geräte können Screenwall also über
+„Zum Startbildschirm hinzufügen" bzw. „Installieren" als eigenständige App
+öffnen (Vollbild, dunkler Hintergrund `#0f1115`).
+
+Die Icons liegen in `public/icons/` und werden aus einer Quelle erzeugt:
+
+```bash
+python3 tools/make-icons.py      # -> public/icons/*, public/favicon.ico
+```
+
+Das Vektor-Favicon `public/favicon.svg` hat dieselbe Geometrie; wird das Motiv
+geändert, bitte beide Stellen nachziehen.
+
 ## Persistenz
 
 Der **Entwurf** liegt in `state.json`, der veröffentlichte (Wand-)Zustand in
