@@ -343,6 +343,7 @@
   let current = null;    // { itemId, type, contentJSON, videoEl }
   let activeSlot = 0;    // welcher der beiden Crossfade-Slots gerade sichtbar ist
   let advanceTimer = null, cleanupTimer = null, monFallback = null;
+  let showGen = 0; // Zähler gegen verspätetes Einblenden (Bild-Dekodierung)
 
   // Vorschau-Uhr (nur viewer 'preview'): misst die verstrichene Zeit im aktuellen
   // Content – auch für statische Inhalte (Farbe/Bild) – und ist pausierbar. Damit
@@ -431,6 +432,7 @@
     clearTimer();
     stopShareReceiver();
     closeExternalWindow();
+    showGen++;
     [slots[0], slots[1], els.ytLayer].forEach((L) => L.classList.remove('active'));
     slots.forEach((s) => { s.innerHTML = ''; });
     YT.pause();
@@ -450,6 +452,16 @@
     opts = opts || {};
     const c = entry.content;
     clearTimer();
+    // Gleiches statisches Item erneut (z.B. Loop einer Playlist mit nur einem
+    // Bild): nichts neu aufbauen – sonst blinkt das Bild bei jedem Durchlauf.
+    // Nur Content-Uhr und Weiterschalten neu starten.
+    if (current && current.itemId === entry.itemId && !opts.startSeconds
+        && (c.type === 'image' || c.type === 'color')
+        && current.contentJSON === JSON.stringify(c)) {
+      pvReset(0, !(isPreview && previewPaused));
+      if (!isPreview && autoAdvance) scheduleAdvance(entry);
+      return;
+    }
     // Beim Verlassen eines Screenshare-Blocks die PeerConnection abbauen (der
     // Capture-Stream beim Publisher bleibt erhalten). buildNode startet bei einem
     // neuen Screenshare-Block den Empfang erneut.
@@ -467,7 +479,7 @@
         force: viewer !== 'monitor', // Wand/Vorschau starten neu; Monitor steigt ein
         onEnded: (autoAdvance && !isPreview && c.videoMode !== 'duration') ? advance : null
       });
-      activate(els.ytLayer);
+      showGen++; activate(els.ytLayer);
       current = { itemId: entry.itemId, type: 'youtube', content: c, contentJSON: JSON.stringify(c), videoEl: null };
     } else {
       const slot = slots[1 - activeSlot];
@@ -476,7 +488,16 @@
       slot.appendChild(node);
       const v = node.querySelector('video');
       if (v) { try { v.currentTime = opts.startSeconds || 0; } catch (_) {} v.play().catch(() => {}); }
-      activate(slot);
+      // Bilder erst einblenden, wenn sie dekodiert sind (kein Schwarzbild beim
+      // Crossfade). Ein neuerer showContent macht ein verspätetes activate wirkungslos.
+      const img = c.type === 'image' ? node.querySelector('img') : null;
+      const gen = ++showGen;
+      if (img && img.decode) {
+        let done = false;
+        const go = () => { if (done) return; done = true; if (gen === showGen) activate(slot); };
+        img.decode().then(go, go);
+        setTimeout(go, 1500);
+      } else activate(slot);
       activeSlot = 1 - activeSlot;
       current = { itemId: entry.itemId, type: c.type, content: c, contentJSON: JSON.stringify(c), videoEl: v || null };
     }
