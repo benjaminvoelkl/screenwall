@@ -144,6 +144,22 @@ journalctl -u screenwall -f
 `chromium --kiosk http://localhost:3000/screen`. Die Lautstärke-Steuerung setzt
 PipeWire/`wpctl` auf dem Wand-Rechner voraus.
 
+#### Nächtlicher Browser-Neustart
+
+`/screen` lädt sich nie neu und hält einen persistenten YouTube-Player. Über
+Tage wächst der Chromium-Renderer und der Player kann in einen Fehlerzustand
+geraten. Deshalb wird der Kiosk-Browser einmal nachts beendet; die
+Start-Schleife des Kiosk-Skripts bringt ihn nach 2 s wieder hoch (Ausfall
+ca. 5–15 s). Der Node-Dienst läuft dabei durch.
+
+```bash
+# Skript: tools/kiosk-restart.sh (beendet nur Prozesse mit dem Kiosk-Profil)
+# Crontab des Kiosk-Benutzers (crontab -e), kein sudo nötig:
+0 4 * * * /home/ip3/screenwall/tools/kiosk-restart.sh
+# Protokoll:
+journalctl -t kiosk-restart
+```
+
 ### HTTPS / Reverse-Proxy
 
 - **Standard:** selbst-signierter HTTPS-Listener auf `HTTPS_PORT` (einmalige
